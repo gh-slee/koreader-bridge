@@ -7,15 +7,31 @@ import Foundation
         if !condition { throw Failure(code: "native_test", message: message) }
     }
     static func snapshot(_ name: String, root: URL) async throws {
-        try await Task.sleep(nanoseconds: 800_000_000)
         guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
               let view = window.contentView else { throw Failure(code: "snapshot", message: "No rendered app window.") }
+        window.deminiaturize(nil)
+        NSApp.unhide(nil)
+        window.collectionBehavior.insert(.moveToActiveSpace)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        try await Task.sleep(nanoseconds: 800_000_000)
         window.displayIfNeeded()
         view.layoutSubtreeIfNeeded()
         let target = root.appendingPathComponent(name)
+        func verifyBounds(_ node: NSView) throws {
+            if let split = node as? NSSplitView {
+                try require(split.frame.height <= view.bounds.height + 1, "Page content escaped the visible window: " + name)
+            }
+            if let table = node as? NSTableView, table.numberOfColumns == 5,
+               let scroll = table.enclosingScrollView {
+                try require(table.bounds.width <= scroll.contentSize.width + 2, "A table column escaped the visible viewport: " + name)
+            }
+            for child in node.subviews { try verifyBounds(child) }
+        }
+        try verifyBounds(view)
         if let ownImage = KBCreateOwnWindowImage(UInt32(window.windowNumber)),
+           ownImage.width >= Int(window.frame.width * 0.9),
            let png = NSBitmapImageRep(cgImage: ownImage).representation(using: .png, properties: [:]) {
             try png.write(to: target)
             return
@@ -44,6 +60,19 @@ import Foundation
     static func run(_ model: AppModel) async {
         guard let root = model.testRoot else { return }
         var cases: [String] = []
+        var captures: [String] = []
+        var layouts: [[String: Any]] = []
+        func capture(_ name: String) async throws {
+            try await snapshot(name, root: root)
+            captures.append(name)
+            if let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) {
+                let size = window.contentLayoutRect.size
+                layouts.append(["capture": name, "width": size.width, "height": size.height, "page": model.section.rawValue])
+            }
+        }
+        func resize(_ width: CGFloat, _ height: CGFloat) {
+            NSApp.windows.first(where: { $0.isVisible })?.setContentSize(NSSize(width: width, height: height))
+        }
         do {
             if let window = NSApp.windows.first(where: { $0.isVisible }) {
                 window.setFrameAutosaveName("")
@@ -51,8 +80,18 @@ import Foundation
             }
             try require(model.health?.protocolVersion == 1, "Bundled protocol health check failed.")
             cases.append("bundled-runtime-health")
-            model.section = .backups
-            try await snapshot("empty-backups.png", root: root)
+            for dark in [false, true] {
+                NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                for compact in [false, true] {
+                    resize(compact ? 940 : 1120, compact ? 680 : 800)
+                    for page in [AppSection.backups, .cleanup] {
+                        model.section = page
+                        try await capture("empty-" + page.rawValue.lowercased() + (compact ? "-compact" : "") + (dark ? "-dark" : "") + ".png")
+                    }
+                }
+            }
+            cases.append("empty-page-layout-matrix")
+            resize(1120, 800); NSApp.appearance = NSAppearance(named: .aqua)
             model.section = .migration
             model.config.sourceModel = "Sample Source"; model.config.targetModel = "Sample Target"; model.config.mode = "full"
             try model.store.save(model.config)
@@ -75,7 +114,7 @@ import Foundation
             try require(refused && (try Data(contentsOf: malformed.file)) == bad, "Malformed preferences were overwritten.")
             cases.append("malformed-preferences-protected")
             await model.createSample()
-            try require(model.sample != nil && model.runs.count == 3, "Sample reader creation failed.")
+            try require(model.sample != nil && model.runs.count == 3 && model.reclaimable > 0, "Sample reader creation or cleanup total failed.")
             model.autoReply = true
             let preview = await model.execute(model.config.workflow(dryRun: true))
             try require(preview && model.runs.contains { $0.status == "audited" }, "FULL preview failed.")
@@ -109,23 +148,54 @@ import Foundation
             let rejected = await model.execute(model.config.workflow(dryRun: true))
             try require(!rejected && model.problem != nil, "Invalid workflow was not presented as an error.")
             cases.append("native-error-presentation")
-            try await snapshot("error-state.png", root: root)
+            model.config.mode = "koreader"
+            try await capture("error-state.png")
             model.problem = nil
             model.declineFinal = false; model.autoReply = false
-            model.notice = "Synthetic end-to-end checks passed. No physical readers were accessed."
+            model.notice = ""; model.logs = []
             model.phase = "Sample session complete"; model.config.mode = "full"
-            model.section = .migration; NSApp.appearance = NSAppearance(named: .aqua)
-            try await snapshot("migration-light.png", root: root)
-            model.section = .backups
-            try await snapshot("backups-light.png", root: root)
-            model.section = .migration; NSApp.appearance = NSAppearance(named: .darkAqua)
-            try await snapshot("migration-dark.png", root: root)
-            if let window = NSApp.windows.first(where: { $0.isVisible }) {
-                window.setContentSize(NSSize(width: 940, height: 680))
-                try await snapshot("migration-compact.png", root: root)
-                cases.append("minimum-window-resize")
+            model.selectedRun = captured.id
+            await model.details()
+            let storedOutput = model.config.outputRoot
+            // Display a synthetic path during Settings captures; no operation uses it.
+            model.config.outputRoot = "/Sample/Private Backups"
+            for dark in [false, true] {
+                NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                for (suffix, width, height) in [("", CGFloat(1120), CGFloat(800)), ("-compact", 940, 680), ("-wide", 1440, 900)] {
+                    resize(width, height)
+                    for page in AppSection.allCases {
+                        model.section = page
+                        try await capture(page.rawValue.lowercased() + suffix + (dark ? "-dark" : "-light") + ".png")
+                    }
+                    model.section = .migration; model.config.mode = "library"
+                    try await capture("library" + suffix + (dark ? "-dark" : "-light") + ".png")
+                    model.config.mode = "full"
+                }
             }
-            let result: [String: Any] = ["passed": true, "cases": cases, "physicalReadersAccessed": false, "source": "actual native app and bundled helper/runtime", "screenshots": ["migration-light.png", "backups-light.png", "migration-dark.png", "empty-backups.png", "error-state.png", "migration-compact.png"]]
+            cases.append("four-page-layout-matrix")
+            cases.append("minimum-window-resize")
+            let originalRuns = model.runs
+            let longRow = RunEntry(id: "sample-long-batch-name-for-reading-setup-migration-and-recovery-2024-01-01",
+                status: "needs-recovery", operation: "restore-target", bytes: 1234567, endedAt: "",
+                targetModified: true, eligible: false,
+                protection: "Protected recovery point. Keep this batch until the target has been checked and all dependent operations have completed successfully.",
+                canReuse: false, canRestore: false)
+            guard let sample = model.sample else { throw Failure(code: "layout", message: "Missing isolated sample workspace.") }
+            let longFolder = URL(fileURLWithPath: sample.workspace).appendingPathComponent("runs").appendingPathComponent(longRow.id)
+            try FileManager.default.createDirectory(at: longFolder, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: ["run_id": longRow.id, "status": longRow.status,
+                "operation": longRow.operation, "target_modified": true]).write(to: longFolder.appendingPathComponent("run.json"))
+            model.runs = [longRow] + model.runs; model.selectedRun = longRow.id; model.summary = [:]
+            resize(940, 680)
+            for page in [AppSection.backups, .cleanup] {
+                model.section = page
+                try await capture("long-" + page.rawValue.lowercased() + ".png")
+            }
+            cases.append("long-batch-and-retention-layout")
+            model.runs = originalRuns; model.selectedRun = captured.id
+            model.config.outputRoot = storedOutput
+            let result: [String: Any] = ["passed": true, "cases": cases, "physicalReadersAccessed": false,
+                "source": "actual native app and bundled helper/runtime", "screenshots": captures, "layouts": layouts]
             try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("NATIVE_TEST_RESULTS.json"))
             NSApp.terminate(nil)
         } catch {

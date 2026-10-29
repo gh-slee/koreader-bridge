@@ -49,3 +49,9 @@ Contributions are under the MIT License. Do not add copied KOReader/device asset
 Build/launch: `python3 scripts/build_macos_app.py --launch`. Verify the actual app: `python3 scripts/verify_macos_app.py "/path/to/KOReader Bridge.app"`. Tests use isolated synthetic readers and capture only the app's own window. See [Mac instructions](docs/MACOS.md) and [desktop architecture](docs/DESKTOP_ARCHITECTURE.md).
 
 Preserve CLI behavior/schemas and core validation. Add malformed-input and workflow regressions for protocol changes. Never automate real-reader writes. Keep binaries, preferences, runtime/research caches, raw outputs and private notes out of Git; manually review synthetic screenshots before publication.
+
+## Pull request descriptions
+
+Use the [canonical PR template](.github/pull_request_template.md) for new PRs and updates. Lead with the problem/result, then focused bullets. Summarize meaningful files/modules with repository-relative paths. Separate local checks, remote CI, independent reviews and required pre-PR validation; give actual status and disclose missing evidence. Keep compatibility, material risks and reviewer focus when relevant. UI evidence must be synthetic and current. Omit unused conditional sections and keep small changes short.
+
+Validate the final body with `python3 scripts/check_pr_description.py --body-file /tmp/pr-body.md`. Pass the same complete Markdown through `--body-file`; do not rely on commit-message autofill. Editorial/Humanizer guidance cannot remove required sections or weaken technical precision. This structure does not certify claims or grant publication permission.

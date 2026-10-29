@@ -14,6 +14,7 @@ EXACT = {'koreader-bridge.py', 'kobo-koreader-migrate.py', 'README.md', 'LICENSE
          'TRACKER.md', 'ACCEPTANCE.md', 'CHANGELOG.md', 'CONTRIBUTING.md',
          'SECURITY.md', '.gitignore', '.githooks/pre-push',
          '.cursor/rules/project-context.mdc', '.github/workflows/tests.yml',
+         '.github/pull_request_template.md', 'scripts/check_pr_description.py',
          'scripts/check_publication.py', 'scripts/publish.py', 'scripts/check_locales.py',
          'scripts/prepare_release.py',
          'locales/registry.json', 'locales/en.json', 'locales/zh-Hant.json', 'locales/zh-Hans.json',

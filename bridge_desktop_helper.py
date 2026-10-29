@@ -228,7 +228,8 @@ def execute(m, request, project):
     if action == "restore":
         args += ["--restore-run", run_id(config.get("runID"))]
     elif action == "delete":
-        args += ["--cleanup", "--delete-run", run_id(config.get("runID"))]
+        args += ["--cleanup", "--delete-run", run_id(config.get("runID")),
+                 "--keep-successful", str(request.get("keepSuccessful", 2))]
     else:
         args += ["--mode", mode]
         if action == "reuse":
@@ -326,9 +327,10 @@ def execute(m, request, project):
         with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):
             code = m.cli()
         stream.flush()
-        rows = catalog(m, project)["runs"]
+        inventory = catalog(m, project, request.get("keepSuccessful", 2))
+        rows = inventory["runs"]
         created = [row for row in rows if row["id"] not in previous_runs]
-        return {"exitCode": code, "runs": rows, "runID": created[0]["id"] if created else None,
+        return {"exitCode": code, "runs": rows, "reclaimableBytes": inventory["reclaimableBytes"], "runID": created[0]["id"] if created else None,
                 "status": created[0]["status"] if created else None}
     finally:
         timer.cancel()
@@ -367,6 +369,9 @@ def serve():
             elif operation == "create_demo":
                 result = demo(workspace(str(project), create=True))
             else:
+                keep = request.get("keepSuccessful", 2)
+                if type(keep) is not int or not 1 <= keep <= 100:
+                    raise ProtocolError("Retention must be between 1 and 100.")
                 result = execute(m, request, project)
         emit("result", ok=True, data=result)
         return 0

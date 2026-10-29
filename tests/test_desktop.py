@@ -115,7 +115,7 @@ class DesktopTests(unittest.TestCase):
 
     def test_bad_scopes_ids_and_volume_workspace_refuse(self):
         for op, values in [("details", {"runID": "../outside"}), ("catalog", {"workspace": "/Volumes/Example"}),
-                           ("execute", {"config": {"command": "arbitrary"}}), ("catalog", {"keepSuccessful": 0})]:
+                           ("execute", {"config": {"command": "arbitrary"}}), ("catalog", {"keepSuccessful": 0}), ("execute", {"keepSuccessful": 0})]:
             with self.subTest(op=op, values=values):
                 result, _ = self.call(op, **values)
                 self.assertFalse(result["ok"])
@@ -152,6 +152,8 @@ class DesktopTests(unittest.TestCase):
         result, _ = self.call("execute", config=self.config(), fixture=base)
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["data"]["exitCode"], 0, result)
+        refreshed, _ = self.call("catalog")
+        self.assertEqual(result["data"]["reclaimableBytes"], refreshed["data"]["reclaimableBytes"])
         self.assertEqual(self.tree(base / "Source"), source_before)
         self.assertEqual(self.tree(base / "Target"), target_before)
         self.assertFalse(list(self.workspace.rglob("*.zip")))
@@ -177,6 +179,19 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(result["data"]["exitCode"], 0)
         self.assertFalse((self.workspace / "runs/sample-2024-01").exists())
         self.assertTrue((self.workspace / "runs" / saved).exists())
+
+    def test_cleanup_uses_the_same_retention_as_its_preview(self):
+        base = self.sample()
+        preview, _ = self.call("catalog", keepSuccessful=1)
+        selected = next(row for row in preview["data"]["runs"] if row["id"] == "sample-2024-02")
+        self.assertTrue(selected["eligible"])
+        result, _ = self.call("execute", config=self.config(dry=False, action="delete", run_id=selected["id"]),
+                              fixture=base, keepSuccessful=1)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["data"]["exitCode"], 0)
+        self.assertFalse((self.workspace / "runs" / selected["id"]).exists())
+        current, _ = self.call("catalog", keepSuccessful=1)
+        self.assertEqual(result["data"]["reclaimableBytes"], current["data"]["reclaimableBytes"])
 
     def test_runtime_archive_rejects_escape(self):
         path = self.root / "bad.tar.gz"

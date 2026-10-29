@@ -328,7 +328,8 @@ struct PreferenceStore {
         do {
             sample = try await backend.call(baseRequest("create_demo")).decode(DemoSession.self)
             notice = "Sample session: all readers and batches here are synthetic."
-            runs = try await backend.call(baseRequest("catalog")).decode(RunCatalog.self).runs
+            let inventory = try await backend.call(baseRequest("catalog")).decode(RunCatalog.self)
+            runs = inventory.runs; reclaimable = inventory.reclaimableBytes
             section = .migration
         } catch { problem = error.localizedDescription }
     }
@@ -367,6 +368,7 @@ struct PreferenceStore {
             var request = baseRequest("execute"); request.config = workflow
             let result = try await backend.call(request) { [weak self] packet in Task { @MainActor in self?.receive(packet) } }
             if let data = result.object["runs"] { runs = try data.decode([RunEntry].self) }
+            if let bytes = result.object["reclaimableBytes"] { reclaimable = Int64(bytes.number) }
             let exit = Int(result.object["exitCode"]?.number ?? 1)
             if exit == 0 {
                 let status = result.object["status"]?.string ?? ""
@@ -468,6 +470,20 @@ struct ReviewView: View {
 }
 extension Workflow: Identifiable { var id: String { action + mode + String(dryRun) + (runID ?? "") } }
 
+// Shared widths keep content centered while preserving native form/table behavior.
+enum PageLayout {
+    static let contentWidth: CGFloat = 1000
+    static let inset: CGFloat = 24
+}
+struct PageColumn<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        content
+            .frame(maxWidth: PageLayout.contentWidth)
+            .padding(.horizontal, PageLayout.inset)
+            .frame(maxWidth: .infinity)
+    }
+}
 struct MigrationView: View {
     @ObservedObject var model: AppModel
     var body: some View {
@@ -509,95 +525,151 @@ struct MigrationView: View {
                     Text("Backups may include plugin credentials and reading history. They stay in this folder; the app has no upload or telemetry action.").font(.callout).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped).disabled(model.busy)
-            HStack {
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            PageColumn {
+                HStack {
                 Button("Save choices") { model.save() }.disabled(model.busy || !model.preferencesWritable)
                 Spacer()
                 Button("Preview changes") { model.review(model.config.workflow(dryRun: true)) }.disabled(model.busy).keyboardShortcut("p", modifiers: [.command, .shift])
                 Button(model.config.mode == "audit" ? "Start audit" : "Start migration") { model.review(model.config.workflow(dryRun: model.config.mode == "audit")) }
                     .buttonStyle(.borderedProminent).disabled(model.busy)
-            }.padding(16)
+                }.padding(.vertical, 16)
+            }
             ActivityView(model: model)
-        }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 struct ActivityView: View {
     @ObservedObject var model: AppModel
     @State private var showDetails = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                if model.busy { ProgressView().controlSize(.small) }
-                Text(model.busy ? "Operation in progress" : "Activity").font(.headline)
-                Spacer()
-                if model.busy { Button("Request safe stop", role: .destructive) { model.cancel() } }
+        VStack(spacing: 0) {
+            Divider()
+            PageColumn {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        if model.busy { ProgressView().controlSize(.small) }
+                        Text(model.busy ? "Operation in progress" : "Activity").font(.headline)
+                        Spacer()
+                        if model.busy { Button("Request safe stop", role: .destructive) { model.cancel() } }
+                    }
+                    if model.logs.isEmpty {
+                        Text("Preview the plan before writing. Progress and core confirmations appear here.")
+                            .foregroundStyle(.secondary).font(.callout)
+                    } else {
+                        Text(model.phase).font(.callout).lineLimit(2).textSelection(.enabled)
+                        DisclosureGroup("Show activity details", isExpanded: $showDetails) {
+                            ScrollView {
+                                Text(model.logs.suffix(100).joined(separator: "\n")).font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                            }.frame(height: 105)
+                        }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 16)
             }
-            if model.logs.isEmpty {
-                Text("Preview the plan before writing. Progress and core confirmations appear here.").foregroundStyle(.secondary).font(.callout)
-            } else {
-                Text(model.phase).font(.callout).lineLimit(2).textSelection(.enabled)
-                DisclosureGroup("Show activity details", isExpanded: $showDetails) {
-                    ScrollView {
-                        Text(model.logs.suffix(100).joined(separator: "\n")).font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    }.frame(height: 105)
-                }
-            }
-        }.padding(16).background(Color(nsColor: .controlBackgroundColor))
+        }.frame(maxWidth: .infinity).background(Color(nsColor: .controlBackgroundColor))
     }
 }
 struct BackupsView: View {
     @ObservedObject var model: AppModel
     var cleanup = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if model.runs.isEmpty {
-                ContentUnavailableView(cleanup ? "No batches to review" : "Your backups will appear here", systemImage: "archivebox",
-                    description: Text("Complete a migration or choose an existing CLI backup folder in Settings. Sample readers let you explore safely."))
-            } else {
-                if cleanup {
-                    HStack { Text("Eligible to reclaim").font(.headline); Spacer(); Text(formattedBytes(model.reclaimable)).monospacedDigit() }.padding(16)
-                    Text("Recent successes, dependencies, recovery points and uncertain batches stay protected. Select an eligible batch; deletion still requires core confirmation.")
-                        .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.bottom, 12)
-                }
-                Table(model.runs, selection: $model.selectedRun) {
-                    TableColumn("Batch") { row in Text(row.id).lineLimit(1) }.width(min: 190, ideal: 250)
-                    TableColumn("Status") { row in Label(row.status, systemImage: row.status == "success" ? "checkmark.circle" : row.status == "needs-recovery" ? "exclamationmark.triangle" : "doc.text").foregroundStyle(row.status == "needs-recovery" ? Color.orange : Color.primary) }.width(min: 110, ideal: 140)
-                    TableColumn("Operation") { row in Text(row.operation.replacingOccurrences(of: "-", with: " ").capitalized).help(row.operation) }.width(min: 90, ideal: 130)
-                    TableColumn("Size") { row in Text(formattedBytes(row.bytes)).monospacedDigit() }.width(min: 70, ideal: 90)
-                    TableColumn("Retention") { row in Text(row.eligible ? "Eligible" : row.protection).lineLimit(2).help(row.protection) }.width(min: 110, ideal: 180)
-                }.onChange(of: model.selectedRun) { _, _ in Task { await model.details() } }
-                if let row = model.currentRun {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack { Text(row.id).font(.headline).textSelection(.enabled); Spacer(); Button("Show in Finder") { model.revealSelected() } }
-                        if !model.summary.isEmpty {
-                            HStack(spacing: 22) {
-                                ForEach(model.summary.keys.sorted(), id: \.self) { key in
-                                    VStack(alignment: .leading) {
-                                        Text(key.replacingOccurrences(of: "_", with: " ").capitalized).foregroundStyle(.secondary)
-                                        Text("\(Int(model.summary[key]?.object["count"]?.number ?? 0)) files").monospacedDigit()
-                                    }.font(.callout)
+        VStack(spacing: 0) {
+            PageColumn {
+                if model.runs.isEmpty {
+                    ContentUnavailableView(cleanup ? "No batches to review" : "Your backups will appear here", systemImage: "archivebox",
+                        description: Text("Complete a migration or choose an existing CLI backup folder in Settings. Sample readers let you explore safely."))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if cleanup {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("Eligible to reclaim").font(.headline)
+                                    Spacer()
+                                    Text(formattedBytes(model.reclaimable)).monospacedDigit()
                                 }
+                                Text("Recent successes, dependencies, recovery points and uncertain batches stay protected. Select an eligible batch; deletion still requires core confirmation.")
+                                    .font(.callout).foregroundStyle(.secondary)
                             }
                         }
-                        if cleanup {
-                            Button("Delete selected batch…", role: .destructive) { model.review(model.config.workflow(action: "delete", dryRun: false, runID: row.id)) }
-                                .disabled(!row.eligible || model.busy)
-                        } else {
-                            HStack {
-                                Button("Preview saved source") { model.review(model.config.workflow(action: "reuse", dryRun: true, runID: row.id)) }
-                                Button("Migrate saved source…") { model.review(model.config.workflow(action: "reuse", dryRun: false, runID: row.id)) }
-                            }.disabled(!row.canReuse || model.busy)
-                            HStack {
-                                Button("Preview target restore") { model.review(model.config.workflow(action: "restore", dryRun: true, runID: row.id)) }
-                                Button("Restore target…") { model.review(model.config.workflow(action: "restore", dryRun: false, runID: row.id)) }
-                            }.disabled(!row.canRestore || model.busy)
-                            if !row.canReuse && !row.canRestore { Text("This batch has no reusable source or exact target snapshot. Its recovery files are retained.").font(.callout).foregroundStyle(.secondary) }
+                        GeometryReader { area in
+                            let usable = max(450, area.size.width - 100)
+                            Table(model.runs, selection: $model.selectedRun) {
+                                TableColumn("Batch") { row in Text(row.id).lineLimit(1).truncationMode(.middle).help(row.id) }.width(usable * 0.29)
+                                TableColumn("Status") { row in
+                                    Label(row.status, systemImage: row.status == "success" ? "checkmark.circle" : row.status == "needs-recovery" ? "exclamationmark.triangle" : "doc.text")
+                                        .foregroundStyle(row.status == "needs-recovery" ? Color.orange : Color.primary)
+                                        .lineLimit(1).help(row.status)
+                                }.width(usable * 0.17)
+                                TableColumn("Operation") { row in Text(row.operation.replacingOccurrences(of: "-", with: " ").capitalized).lineLimit(1).help(row.operation) }.width(usable * 0.16)
+                                TableColumn("Size") { row in Text(formattedBytes(row.bytes)).monospacedDigit() }.width(usable * 0.11)
+                                TableColumn("Retention") { row in Text(row.eligible ? "Eligible" : row.protection).lineLimit(2).help(row.protection) }.width(usable * 0.27)
+                            }
+                            .frame(width: area.size.width, height: area.size.height)
+                            .clipped()
+                            .id(cleanup)
                         }
-                    }.padding(16)
+                        .frame(minHeight: 140)
+                        .onChange(of: model.selectedRun) { _, _ in Task { await model.details() } }
+                        if let row = model.currentRun {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text(row.id).font(.headline).lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(row.id)
+                                    Spacer()
+                                    Button("Show in Finder") { model.revealSelected() }
+                                }
+                                if !model.summary.isEmpty {
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), alignment: .leading)], alignment: .leading, spacing: 12) {
+                                        ForEach(model.summary.keys.sorted(), id: \.self) { key in
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(key.replacingOccurrences(of: "_", with: " ").capitalized).foregroundStyle(.secondary)
+                                                Text("\(Int(model.summary[key]?.object["count"]?.number ?? 0)) files").monospacedDigit()
+                                            }.font(.callout)
+                                        }
+                                    }
+                                }
+                                if cleanup {
+                                    HStack(alignment: .top) {
+                                        Text(row.eligible ? "This batch is eligible. Review it before deleting." : row.protection)
+                                            .font(.callout).foregroundStyle(.secondary).lineLimit(3).help(row.protection)
+                                        Spacer()
+                                        Button("Delete selected batch…", role: .destructive) { model.review(model.config.workflow(action: "delete", dryRun: false, runID: row.id)) }
+                                            .disabled(!row.eligible || model.busy)
+                                    }
+                                } else {
+                                    ViewThatFits(in: .horizontal) {
+                                        HStack(spacing: 20) { sourceActions(row); restoreActions(row) }
+                                        VStack(alignment: .leading, spacing: 12) { sourceActions(row); restoreActions(row) }
+                                    }
+                                    if !row.canReuse && !row.canRestore {
+                                        Text("This batch has no reusable source or exact target snapshot. Its recovery files are retained.")
+                                            .font(.callout).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            Text(cleanup ? "Select a batch to review its protection and deletion options." : "Select a batch to inspect its snapshots and available actions.")
+                                .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
+                        }
+                    }.padding(.vertical, PageLayout.inset)
                 }
-            }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
             ActivityView(model: model)
-        }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    private func sourceActions(_ row: RunEntry) -> some View {
+        HStack {
+            Button("Preview saved source") { model.review(model.config.workflow(action: "reuse", dryRun: true, runID: row.id)) }
+            Button("Migrate saved source…") { model.review(model.config.workflow(action: "reuse", dryRun: false, runID: row.id)) }
+        }.disabled(!row.canReuse || model.busy)
+    }
+    private func restoreActions(_ row: RunEntry) -> some View {
+        HStack {
+            Button("Preview target restore") { model.review(model.config.workflow(action: "restore", dryRun: true, runID: row.id)) }
+            Button("Restore target…") { model.review(model.config.workflow(action: "restore", dryRun: false, runID: row.id)) }
+        }.disabled(!row.canRestore || model.busy)
     }
 }
 struct SettingsView: View {
@@ -624,6 +696,7 @@ struct SettingsView: View {
                 Button("Open usage guide") { if let url = Bundle.main.resourceURL?.appendingPathComponent("backend/docs/MACOS.md") { NSWorkspace.shared.open(url) } }
             }
         }.formStyle(.grouped).disabled(model.busy)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 struct MainView: View {
@@ -654,7 +727,8 @@ struct MainView: View {
                 case .cleanup: BackupsView(model: model, cleanup: true)
                 case .settings: SettingsView(model: model)
                 }
-            }.navigationTitle(model.section.rawValue)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                .navigationTitle(model.section.rawValue)
                 .toolbar {
                     ToolbarItem { Button { Task { await model.refresh() } } label: { Label("Refresh batches", systemImage: "arrow.clockwise") }.disabled(model.busy).keyboardShortcut("r", modifiers: .command) }
                 }

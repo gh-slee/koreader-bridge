@@ -31,14 +31,19 @@ Before each publication, review the exact staged diff, commit range, destination
 
 GitHub CLI is optional maintainer tooling, unnecessary for migration. Authenticate with its browser/OS credential-store flow. Never print tokens or paste credentials into source, logs, issues or an AI chat.
 
-When authorized to publish a committed, clean feature branch, prepare a reviewed English PR body and run:
+Use the [canonical PR template](../.github/pull_request_template.md) for creation and updates. Build its summary/file groups from the actual base-to-head diff and current behavior. Keep local checks, CI runs, independent QA/reviews and pre-PR validation separate. Link exact CI revisions/runs only after observing them; report pending/not-run/failed checks. Developer self-testing is not independent QA. Handoffs preserve actual commands, counts/skips, review provenance, risks and gaps. Humanizer may improve wording while retaining required headings and evidence.
+
+For this repository, pre-PR evidence covers existing publication/privacy, locales, tests, self-test and applicable native build/launch/visual checks. Record the reviewed revision and any gap; no image gate from another project is implied. Approval and manual/device acceptance requirements remain unchanged. Neither the template nor its structural validator proves factual accuracy or permission.
+
+When authorized to publish a committed, clean feature branch, prepare and validate a reviewed English PR body, then run:
 
 ```bash
+python3 scripts/check_pr_description.py --body-file /tmp/pr-body.md
 python3 scripts/publish.py --repository OWNER/REPO \
   --title "Explain the change" --body-file /tmp/pr-body.md
 ```
 
-Use the exact repository identity shown by origin. The helper checks the destination, branch, clean tree, PR content, privacy, locales, tests and self-test. It performs an ordinary push and creates/reuses an open PR. It never merges, force-pushes or publishes releases. Publication helpers do not replace the operator's authorization requirements.
+Use the exact repository identity shown by origin. The helper checks the destination, branch, clean tree, PR content, privacy, locales, tests and self-test. It freezes validated Markdown bytes in a private temporary file, performs an ordinary push and explicitly passes `--body-file` to create a PR or replace its existing title/body. It never uses autofill. Refresh the complete body after material changes; do not append a session diary. It never merges, force-pushes or publishes releases. Publication helpers do not replace the operator's authorization requirements.
 
 ## Release readiness
 
