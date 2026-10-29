@@ -2,12 +2,13 @@
 
 <p align="center">
   <strong>Bring your reading setup to your next device.</strong><br/>
-  An independent, MIT-licensed open-source Python CLI for migrating KOReader, supported ebooks, reading data and fonts.<br/>
+  An independent, MIT-licensed native Mac app and offline CLI for migrating KOReader, supported ebooks, reading data and fonts.<br/>
   Currently supports Kobo → Kobo migration on macOS.<br/>
   Keep the original folder paths, preview changes and verify copied files.
 </p>
 
 <p align="center">
+  <a href="#macos-app"><img alt="Native SwiftUI app" src="https://img.shields.io/badge/SwiftUI-macOS_14%2B-008080?style=flat-square&amp;logo=swift&amp;logoColor=white"/></a>
   <a href="https://github.com/gh-slee/koreader-bridge/actions/workflows/tests.yml?query=branch%3Amain"><img alt="Main branch CI status" src="https://github.com/gh-slee/koreader-bridge/actions/workflows/tests.yml/badge.svg?branch=main&amp;event=push"/></a>
   <a href="#tech-stack"><img alt="Python 3.9 or newer" src="https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white"/></a>
   <a href="#requirements"><img alt="Device migration requires macOS" src="https://img.shields.io/badge/macOS-USB_migration-111827?style=flat-square&amp;logo=apple&amp;logoColor=white"/></a>
@@ -18,6 +19,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
+  <a href="#cli-quick-start">CLI</a> ·
   <a href="#choose-a-mode">Modes</a> ·
   <a href="#device-support">Device support</a> ·
   <a href="#tech-stack">Tech stack</a> ·
@@ -27,7 +29,43 @@
 </p>
 
 > [!IMPORTANT]
-> **This source snapshot is version `1.0.0`.** Device migration supports Kobo → Kobo on macOS. KOREADER has scoped Libra 2 → Clara 2E hardware confirmation, including normal use and progress persistence. FULL/LIBRARY remain available with automated coverage; successful physical copying for those modes and broader manual review remain incomplete. See the [validation record](ACCEPTANCE.md#validation-record-2026-10-22) and [release scope](ACCEPTANCE.md#first-stable-release-gates). A version in source is not proof of publication: use the [release list](https://github.com/gh-slee/koreader-bridge/releases) for published assets.
+> **Desktop development source: `1.1.0-dev.1`.** The native app is a local development build, not a notarized download. The published 1.0.0 release contains the CLI only. Device migration supports Kobo → Kobo on macOS. KOREADER has scoped Libra 2 → Clara 2E hardware confirmation, including normal use and progress persistence. FULL/LIBRARY remain available with automated coverage; successful physical copying for those modes and broader manual review remain incomplete. See the [validation record](ACCEPTANCE.md#validation-record-2026-10-22) and [release scope](ACCEPTANCE.md#first-stable-release-gates). A version in source is not proof of publication: use the [release list](https://github.com/gh-slee/koreader-bridge/releases) for published assets.
+
+<a id="quick-start"></a>
+
+## macOS app
+
+KOReader Bridge now has a native SwiftUI interface backed by the same migration engine as the CLI. Configure migrations, inspect batches, reuse a saved source, restore a target snapshot and review cleanup. Writing workflows retain core confirmations, identity checks, verified backups and recovery behavior.
+
+![Native KOReader Bridge app with synthetic sample readers](assets/desktop/migration-light.png)
+
+### Build and launch
+
+Requires **Apple Silicon, macOS 14+**, Apple command-line Swift tools and Python 3.9+ **for building**:
+
+```bash
+python3 scripts/build_macos_app.py --launch
+```
+
+The builder prints the exact new `KOReader Bridge.app` path and preserves earlier builds. Its first build downloads a checksum-pinned CPython runtime; later builds reuse the verified cache. The finished app includes Python and launches without shell configuration, an installed Python, network access or an AI service.
+
+- **Migration:** FULL, KOREADER, LIBRARY and AUDIT; preview, progress, reader-role/build confirmations and graceful stop.
+- **Backups:** reopen existing CLI output folders, inspect batches/differences, reuse sources and preview/perform exact target restoration.
+- **Cleanup:** eligibility/protection preview; actual deletion requires exact typed confirmation.
+- **Settings:** private output folder, saved workflow choices, core language and retention; unknown preference fields survive.
+- **Sample readers:** opt-in synthetic devices and batches in a separate private workspace. No physical reader is accessed.
+
+The native interface is English; core prompts/progress support English, Traditional Chinese and Simplified Chinese. Preferences/default data use the current account's Application Support/KOReader Bridge; existing CLI defaults and schemas are unchanged.
+
+Local builds are **ad-hoc signed, not notarized**. Intel packaging and a public signed DMG are not implemented. See [Mac instructions](docs/MACOS.md), [architecture](docs/DESKTOP_ARCHITECTURE.md) and [security](SECURITY.md). The existing [v1.0.0 release](https://github.com/gh-slee/koreader-bridge/releases/tag/v1.0.0) remains the historical CLI distribution.
+
+<details>
+<summary>Dark appearance and backup browser (actual app; synthetic data)</summary>
+
+![Dark app](assets/desktop/migration-dark.png)
+![Backup browser](assets/desktop/backups-light.png)
+
+</details>
 
 ## Why use it?
 
@@ -54,7 +92,7 @@ Additional device support is outside the first `1.0.0` milestone. Each new platf
 
 Current source uses **`koreader-bridge.py`**. Keep the adjacent `kobo-koreader-migrate.py` shared engine and the complete `locales/` directory; the old script remains a compatible command. Both entries use the same run root, locks and migration safeguards. Published RC1/3.x packages predate the new entry; use their original legacy commands and contents. The quick start below uses the current canonical entry. New source packages use `koreader-bridge-VERSION.zip`; historical packages retain their original names and bytes.
 
-## Quick start
+## CLI quick start
 
 Use a published package from the [release list](https://github.com/gh-slee/koreader-bridge/releases), or clone the source. The commands below target version `1.0.0`; confirm that release and its named assets are listed before downloading. Start with offline checks and a dry run. Existing RC1/3.x packages retain their original filenames and instructions.
 
@@ -153,6 +191,9 @@ SOURCE is ejected before TARGET is requested. Writes require final confirmation;
 
 ## Tech stack
 
+The native app uses **SwiftUI + AppKit + Foundation.Process** and bundled, pinned **CPython 3.13**. A bounded versioned JSON adapter calls the existing standard-library migration core. Source builds use `swiftc`; launch requires no package manager or shell runtime.
+
+
 | Layer | Technology |
 | --- | --- |
 | 🐍 CLI | Python standard library, Python 3.9+ |
@@ -197,7 +238,7 @@ Validation distinguishes device results from synthetic tests:
 | Evidence | Confirmed scope | Remaining limits |
 | --- | --- | --- |
 | KOREADER on hardware | Kobo Libra 2 → Kobo Clara 2E using the 3.3.0-dev.6 package: whole-runtime transfer, full manifest verification, TARGET identity preservation and safe eject. The operator confirmed startup, opening an existing TARGET book, usual functions and progress persistence after reopening. | Confirmation covers the tested use; other models, builds and plugin combinations need their own checks. |
-| Current runtime baseline | The merged CLI baseline passed 194 unit tests and six main CI jobs. A separate local rehearsal passed 42 synthetic cases across English, Traditional Chinese and Simplified Chinese; the exact-baseline source package passed 11 extracted checks with both entries. | Synthetic mount selection and safe eject were mocked. File-transfer checks do not verify reader rendering or hardware behavior. |
+| CLI 1.0 runtime baseline | The merged CLI baseline passed 194 unit tests and six main CI jobs. A separate local rehearsal passed 42 synthetic cases across English, Traditional Chinese and Simplified Chinese; the exact-baseline source package passed 11 extracted checks with both entries. | Synthetic mount selection and safe eject were mocked. File-transfer checks do not verify reader rendering or hardware behavior. |
 | FULL and LIBRARY | Synthetic transfer/recovery coverage; a physical FULL preview safely refused insufficient TARGET space before writes. | Successful physical copying with adequate capacity remains pending. |
 
 See the [dated evidence and sources](ACCEPTANCE.md#validation-record-2026-10-22) and [remaining practical checks](ACCEPTANCE.md#remaining-practical-checks). Existing KOREADER device evidence remains valid for its tested build and scope. Broader recovery/cleanup acceptance and complete human translation review remain follow-up work. The [release criteria](ACCEPTANCE.md#first-stable-release-gates) require exact-artifact checks and explicit acceptance of these disclosed limits.

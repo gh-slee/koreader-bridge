@@ -1,6 +1,6 @@
 # Agent instructions
 
-This is the shared project guidance for coding agents. Human usage belongs in README.md; contribution workflow belongs in CONTRIBUTING.md. The product is a macOS Python 3.9+ CLI using only the standard library, JSON locale catalogs and unittest; Linux CI checks fixtures only.
+This is the shared project guidance for coding agents. Human usage belongs in README.md; contribution workflow belongs in CONTRIBUTING.md. The product has a SwiftUI/AppKit Mac app and compatible Python 3.9+ standard-library CLI. The app uses bundled pinned CPython and bounded JSON IPC; Linux CI checks fixtures only.
 
 ## Find task context
 
@@ -20,6 +20,14 @@ This is the shared project guidance for coding agents. Human usage belongs in RE
 - Keep normal cancellation distinct from migration and recovery errors. Do not selectively preserve hardware settings or merge reading metadata without an implemented, tested policy.
 - Use koreader-bridge.py as the canonical CLI; retain kobo-koreader-migrate.py as the shared engine and compatible legacy entry. Keep both files and locales together. Both entries must share run roots, locks, safety decisions and exit handling. Record versions in code/logs/JSON; generated data stays in runs/<run-id>/ under the selected project root.
 - Runtime UI after locale loading uses explicit catalog IDs for owned errors/prompts/progress/warnings/cleanup reasons and custom parser checks. Keep exception args, saved warning/reason strings, machine tokens and diagnostic logs English. Preserve structured children through diagnostic_detail/join_diagnostics; never infer IDs from rendered text. Raw external diagnostics, Python parser/traceback text and locale-bootstrap failures are deliberate original-text boundaries. Human wording/hardware acceptance remains pending.
+
+## Native desktop
+
+- Read docs/DESKTOP_ARCHITECTURE.md and docs/MACOS.md. Reuse core validation; IPC must not expose arbitrary code/commands/files.
+- Keep stdout bounded JSON, typed allowlists, request-bound prompts, redaction, private storage and graceful stop. Never force-kill a real writing backend.
+- Build with scripts/build_macos_app.py; verify actual bundled workflows with scripts/verify_macos_app.py and isolated samples. Report automated, launch, visual and hardware/user evidence separately.
+- Bundle explicit sources/pinned runtime only; retain licenses. Ad-hoc is not notarized. Keep binaries/caches/fixtures ignored; public screenshots must be manually inspected sample-only content.
+- Do not rewrite historical release capabilities or GitHub metadata without scoped authorization.
 
 ## Verify changes
 

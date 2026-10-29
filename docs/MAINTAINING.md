@@ -113,3 +113,11 @@ Use `--repository gh-slee/koreader-bridge` with `scripts/publish.py`. The active
 GitHub redirects cover web and ordinary Git operations. Do not recreate the old repository slug, because that can remove redirects. GitHub Pages URLs and references to hosted actions/reusable workflows require separate attention if used; this repository currently has no Pages site, consumes external checkout/setup actions and does not expose its own action or reusable workflow.
 
 For any future rename, first review the exact old/new identity, verify availability/admin access, retain repository/ref/issue/PR/release/asset baselines and obtain approval. Rename the existing repository, update remotes/current links and verify continuity, downloads and exact-commit CI afterward. Keep private records and backups local. See [GitHub repository rename documentation](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository) and the [GitHub CLI rename reference](https://cli.github.com/manual/gh_repo_rename). Renaming does not grant permission for a source push, release, device operation or backup cleanup.
+
+## Native app distribution
+
+Build with `python3 scripts/build_macos_app.py`. Maintain `desktop/runtime-lock.json` by reviewing CPython/standalone security and licenses, then updating version, release URL, byte count and SHA-256 together. Never bundle a maintainer's shell Python or personal environment.
+
+Local builds use fresh ignored directories and ad-hoc signing. Public distribution needs an architecture/OS policy, maintained runtime, Developer ID, hardened-runtime/entitlement review, nested signing, notarization/stapling and reviewed DMG/ZIP download verification. Existing outputs/historical releases remain intact.
+
+GitHub About/topics/release descriptions are separate metadata. Audit them, but do not change them without scoped authorization. v1.0.0 predates the native app and remains a CLI release.

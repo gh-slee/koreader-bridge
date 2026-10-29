@@ -43,3 +43,9 @@ Keep private data and local instructions out of Git. Review staged content and r
 Report the tool/macOS/Python versions, mode, expected behavior and a minimal synthetic reproduction or redacted message. Do not attach actual books, serials, settings, databases, raw logs, manifests or archives. Follow SECURITY.md for sensitive findings.
 
 Contributions are under the MIT License. Do not add copied KOReader/device assets or third-party books/fonts/plugins.
+
+## Native macOS development
+
+Build/launch: `python3 scripts/build_macos_app.py --launch`. Verify the actual app: `python3 scripts/verify_macos_app.py "/path/to/KOReader Bridge.app"`. Tests use isolated synthetic readers and capture only the app's own window. See [Mac instructions](docs/MACOS.md) and [desktop architecture](docs/DESKTOP_ARCHITECTURE.md).
+
+Preserve CLI behavior/schemas and core validation. Add malformed-input and workflow regressions for protocol changes. Never automate real-reader writes. Keep binaries, preferences, runtime/research caches, raw outputs and private notes out of Git; manually review synthetic screenshots before publication.

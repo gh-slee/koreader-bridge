@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0-dev.1 — native desktop development
+
+- Add SwiftUI/AppKit Migration, Backups, Cleanup and Settings over the shared migration engine, with bounded request-bound JSON prompts/progress.
+- Bundle a pinned relocatable CPython runtime; add isolated fresh app builds, ad-hoc signing and actual native synthetic workflow/capture checks. No shell Python, LLM or launch-time network dependency.
+- Preserve CLI schemas/safety, private recovery data and unknown preference fields. Add explicit desktop/synthetic-capture publication inputs.
+- Align app/CLI docs and distribution status. v1.0.0 remains a historical CLI release; native hardware/user acceptance and notarized distribution remain pending.
+
 ## 1.0.0 — stable compatibility baseline
 
 - Establish the 1.x compatibility baseline for documented CLI flags/modes, exit meanings and versioned run/snapshot/manifest schemas. Retain FULL, KOREADER, LIBRARY, AUDIT, dry-run, the canonical and compatible legacy entries, offline operation and existing migration safeguards.
