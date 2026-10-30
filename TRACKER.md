@@ -1,6 +1,6 @@
 # KOReader Bridge development tracker
 
-Last reconciled: **2026-10-29**. Source snapshot version: **1.1.0-dev.1** (native desktop development; the published 1.0.0 remains a CLI release). [1.0.0-rc.1](https://github.com/gh-slee/koreader-bridge/releases/tag/v1.0.0-rc.1) was published on 2026-10-21 as a pre-release, not Latest. Check the release list for later published assets. Broader physical/manual acceptance remains pending. See [first-stable release gates](ACCEPTANCE.md#first-stable-release-gates) and the [version policy](docs/MAINTAINING.md#versioning-and-first-stable-release).
+Last reconciled: **2026-10-30**. Source snapshot version: **1.1.0-dev.2** (native desktop development; the published 1.0.0 remains a CLI release). [1.0.0-rc.1](https://github.com/gh-slee/koreader-bridge/releases/tag/v1.0.0-rc.1) was published on 2026-10-21 as a pre-release, not Latest. Check the release list for later published assets. Broader physical/manual acceptance remains pending. See [first-stable release gates](ACCEPTANCE.md#first-stable-release-gates) and the [version policy](docs/MAINTAINING.md#versioning-and-first-stable-release).
 
 Status vocabulary: `Queued`, `In progress`, `Ready for test`, `Blocked`, `Done`, `Deferred`. KM-011, KM-005, KM-001 and KM-003 are implemented and ready for user testing; ticket-wide human sign-off remains pending despite scoped KOREADER success. Entries represent planned work, not permission to operate physical devices or delete backups.
 
@@ -19,6 +19,8 @@ Acceptance for every ticket must include standalone CLI operation without AI API
 ## Native desktop milestone: 1.1
 
 KM-025 implements a development SwiftUI app with Migration, Backups, Cleanup and Settings, bounded request/prompt JSON over the existing core, private persistent preferences, existing-batch reopening, sample readers, bundled pinned Python and ad-hoc local builds. Backend tests, actual app integration and visual inspection are separate from physical/user acceptance. Intel packaging, Developer ID/notarized distribution and a public DMG remain future work. Existing v1.0.0 releases/ticket sign-offs are unchanged.
+
+KM-026 adds native model-code recognition, USB-to-volume/identity cross-checks, connection-bound source/target selection, explicit manual model corrections and revalidation before writes. Two connected readers are supported by the desktop adapter while sequential mode/CLI remain compatible. Unknown/conflicting model labels require confirmation; identity failures cannot be overridden by labels. Automated synthetic verification and controlled real-device/user acceptance remain distinct.
 
 ## Current acceptance work
 
@@ -78,6 +80,7 @@ No Kindle support, platform priority, delivery date or complete cross-platform m
 | KM-023 | P2 | Queued | First non-Kobo device adapter (platform TBD) | Depends on KM-021/022 and a separately authorized implementation scope. Add explicit route selection and platform-specific offline capture/apply/restore, synthetic failure/compatibility regressions and controlled hardware acceptance; document exact tested scope and unsupported routes before advertising support. |
 | KM-024 | P2 | Ready for test | Canonical CLI and runtime branding | Add koreader-bridge.py while retaining the shared legacy entry; align three-locale help/banner/preview and new manifest labels; preserve schemas, output root and locks. Coordinate docs/CI/checkers/publication allowlist and current/historical packaging. Verify equivalent offline CLI, cross-entry FULL/restore, shared locks, old manifests/packages and unchanged existing assets. Human wording acceptance remains pending. |
 | KM-025 | P1 | Ready for test | Native macOS application | SwiftUI/AppKit over shared core; bounded helper, bundled runtime, persistent unknown-safe preferences, existing batches, guarded operations and isolated real-app tests. Sample-only actual screenshots; physical user sign-off/notarized distribution pending. |
+| KM-026 | P1 | Ready for test | Bound reader selection and model corrections | Native model codes plus USB storage ancestry/serial consistency, distinct physical roles, session-only correction confirmation, write-boundary revalidation, dual-reader and sequential fixtures; physical GUI migration acceptance remains pending. |
 
 ## Completed baseline (verified in current code)
 

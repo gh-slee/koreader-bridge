@@ -29,7 +29,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Desktop development source: `1.1.0-dev.1`.** The native app is a local development build, not a notarized download. The published 1.0.0 release contains the CLI only. Device migration supports Kobo → Kobo on macOS. KOREADER has scoped Libra 2 → Clara 2E hardware confirmation, including normal use and progress persistence. FULL/LIBRARY remain available with automated coverage; successful physical copying for those modes and broader manual review remain incomplete. See the [validation record](ACCEPTANCE.md#validation-record-2026-10-22) and [release scope](ACCEPTANCE.md#first-stable-release-gates). A version in source is not proof of publication: use the [release list](https://github.com/gh-slee/koreader-bridge/releases) for published assets.
+> **Desktop development source: `1.1.0-dev.2`.** The native app is a local development build, not a notarized download. The published 1.0.0 release contains the CLI only. Device migration supports Kobo → Kobo on macOS. KOREADER has scoped Libra 2 → Clara 2E hardware confirmation, including normal use and progress persistence. FULL/LIBRARY remain available with automated coverage; successful physical copying for those modes and broader manual review remain incomplete. See the [validation record](ACCEPTANCE.md#validation-record-2026-10-22) and [release scope](ACCEPTANCE.md#first-stable-release-gates). A version in source is not proof of publication: use the [release list](https://github.com/gh-slee/koreader-bridge/releases) for published assets.
 
 <a id="quick-start"></a>
 
@@ -49,7 +49,7 @@ python3 scripts/build_macos_app.py --launch
 
 The builder prints the exact new `KOReader Bridge.app` path and preserves earlier builds. Its first build downloads a checksum-pinned CPython runtime; later builds reuse the verified cache. The finished app includes Python and launches without shell configuration, an installed Python, network access or an AI service.
 
-- **Migration:** automatic read-only connection/model-hint updates, source/target dropdowns, FULL/KOREADER/LIBRARY/AUDIT, preview, progress, core confirmations and graceful stop. Model hints remain selectable after unplugging; unknown models can be entered manually.
+- **Migration:** native model identification and USB identity checks, actual connected-reader source/target dropdowns, FULL/KOREADER/LIBRARY/AUDIT, preview, progress, core confirmations and graceful stop. Both readers can stay connected; sequential connection remains available. **Correct model…** opens a physical-model confirmation sheet for wrong/unknown identification. A correction cannot bypass identity checks; reconnecting requires a fresh selection.
 - **Backups:** reopen existing CLI output folders, inspect batches/differences, reuse sources and preview/perform exact target restoration.
 - **Cleanup:** eligibility/protection preview; actual deletion requires exact typed confirmation.
 - **Settings:** private output folder, saved workflow choices, core language and retention; unknown preference fields survive.

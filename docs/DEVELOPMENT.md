@@ -39,6 +39,8 @@ Reading metadata and plugins are transferred as files. Lua is not an execution d
 ```text
 koreader-bridge.py        canonical CLI; loads the adjacent shared engine
 kobo-koreader-migrate.py   shared migration/management engine and compatible legacy CLI
+bridge_desktop_helper.py  bounded desktop protocol adapter over the shared engine
+bridge_devices.py         read-only model/USB discovery and connection-bound role validation
 locales/                 registry and reviewed UTF-8 catalogs
 scripts/                 locale/privacy checks, source-package preparation and PR helper
 tests/                   synthetic migration, management, locale and privacy regressions
@@ -65,6 +67,8 @@ python3 scripts/check_publication.py --worktree --history
 ```
 
 Tests use temporary synthetic devices and mock USB/eject operations. On macOS, an additional test uses real ditto for FULL migration, saved-source reuse and exact TARGET restoration on temporary directories. It never reads a physical Kobo; other test hosts skip that fixture.
+
+Reader discovery tests supply an isolated USB storage graph. Cover native/USB agreement, shared/unknown product codes, manual model corrections, serial mismatch, duplicate roles, unsafe identity files, reconnection tokens and identity replacement at the final write boundary. Native checks drive actual selection/correction state and dual-reader synthetic workflows through the bundled helper. Do not use host ioreg or physical readers as automated fixtures. Model mappings are offline interoperability facts; references are the current Calibre Kobo driver and koboutils device table, with newer hardware revisions reviewed separately. A known name is not hardware migration certification.
 
 Add meaningful tests for changed behavior and safety boundaries. Documentation-only work needs relative-link/anchor checks, CLI/example verification, shell syntax checks and publication privacy review. The publication helper independently runs its mandatory full checks before uploading.
 

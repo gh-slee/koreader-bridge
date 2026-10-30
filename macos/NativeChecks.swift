@@ -3,11 +3,15 @@ import AppKit
 import Foundation
 
 @MainActor enum NativeChecks {
+    static func captureWindow(_ name: String) -> NSWindow? {
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.sheetParent == nil }) else { return nil }
+        return name.hasPrefix("model-correction") ? window.attachedSheet : window
+    }
     static func require(_ condition: Bool, _ message: String) throws {
         if !condition { throw Failure(code: "native_test", message: message) }
     }
     static func snapshot(_ name: String, root: URL) async throws {
-        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
+        guard let window = captureWindow(name),
               let view = window.contentView else { throw Failure(code: "snapshot", message: "No rendered app window.") }
         window.deminiaturize(nil)
         NSApp.unhide(nil)
@@ -65,7 +69,7 @@ import Foundation
         func capture(_ name: String) async throws {
             try await snapshot(name, root: root)
             captures.append(name)
-            if let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) {
+            if let window = captureWindow(name) {
                 let size = window.contentLayoutRect.size
                 layouts.append(["capture": name, "width": size.width, "height": size.height, "page": model.section.rawValue])
             }
@@ -116,13 +120,56 @@ import Foundation
             await model.createSample()
             try require(model.sample != nil && model.runs.count == 3 && model.reclaimable > 0, "Sample reader creation or cleanup total failed.")
             await model.refreshConnected()
-            try require(model.connected?.modelHint == "Kobo Sample Source" &&
-                        model.modelOptions.contains("Kobo Sample Source"), "Connected reader discovery failed.")
-            let savedTarget = model.config.targetModel
-            model.config.sourceModel = model.connected!.modelHint!
-            try require(model.config.targetModel == savedTarget, "Selecting a source changed the target.")
-            cases.append("connected-reader-model-options")
+            try require(model.readers.count == 2 && model.readers.allSatisfy { $0.usbVerified && $0.selectable }, "Dual reader discovery failed.")
+            guard let source = model.readers.first(where: { $0.volume == "Source" }),
+                  var target = model.readers.first(where: { $0.volume == "Target" }) else {
+                throw Failure(code: "native_test", message: "Missing synthetic connected readers.")
+            }
+            model.selectReader(source.id, role: "source"); model.selectReader(target.id, role: "target")
+            try require(model.config.sourceModel == "Kobo Libra 2" && model.config.targetModel == "Kobo Clara 2E", "Native model choices failed.")
+            model.selectReader(source.id, role: "target")
+            try require(model.targetReaderID == target.id, "Same-reader selection was allowed.")
+            model.readerProblem = nil
+            cases.append("bound-dual-reader-choices")
+            model.correctModel("source")
+            guard let correction = model.readerCorrection else { throw Failure(code: "native_test", message: "Missing correction warning.") }
+            model.confirmModel(correction, model: "Kobo Clara 2E")
+            let corrected = try model.boundWorkflow(model.config.workflow(dryRun: true))
+            try require(corrected.readers?["source"]?.model == "Kobo Clara 2E", "Manual correction was not bound to the reader.")
+            cases.append("manual-model-warning-and-bound-confirmation")
+            model.correctModel("source")
+            let presentation = model.readerCorrection!
+            try await Task.sleep(nanoseconds: 400_000_000)
+            try await capture("model-correction-warning.png")
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+            try await capture("model-correction-warning-dark.png")
+            NSApp.appearance = NSAppearance(named: .aqua)
+            model.confirmModel(presentation, model: "Kobo Libra 2")
             model.autoReply = true
+            let boundPreview = try model.boundWorkflow(model.config.workflow(dryRun: true))
+            let boundResult = await model.execute(boundPreview)
+            try require(boundResult, "Bound dual-reader preview failed.")
+            let boundTransfer = try model.boundWorkflow(model.config.workflow(dryRun: false))
+            let boundCopied = await model.execute(boundTransfer)
+            try require(boundCopied, "Bound dual-reader transfer failed.")
+            cases.append("bound-dual-preview-and-transfer")
+            guard let sampleRoot = model.sample?.fixtureRoot else { throw Failure(code: "native_test", message: "Missing sample root.") }
+            let usbFile = URL(fileURLWithPath: sampleRoot).appendingPathComponent(".bridge-usb.json")
+            var usb = try JSONSerialization.jsonObject(with: Data(contentsOf: usbFile)) as! [[String: Any]]
+            usb[1]["registry"] = 3
+            try JSONSerialization.data(withJSONObject: usb).write(to: usbFile, options: .atomic)
+            await model.refreshConnected()
+            try require(model.reader("target") == nil, "A replaced connection retained its old selection.")
+            var staleRefused = false
+            do { _ = try model.boundWorkflow(model.config.workflow(dryRun: true)) } catch { staleRefused = true }
+            try require(staleRefused, "A stale reader choice could start an operation.")
+            guard let replacement = model.readers.first(where: { $0.volume == "Target" }) else { throw Failure(code: "native_test", message: "Missing replacement sample reader.") }
+            target = replacement
+            model.selectReader(target.id, role: "target")
+            cases.append("reconnect-refuses-stale-role-and-approval")
+            // Keep existing sequential workflows as compatibility coverage.
+            model.useConnectedReaders = false
+            model.config.sourceModel = "Sample Source"; model.config.targetModel = "Sample Target"
             let preview = await model.execute(model.config.workflow(dryRun: true))
             try require(preview && model.runs.contains { $0.status == "audited" }, "FULL preview failed.")
             cases.append("full-preview")
@@ -167,6 +214,8 @@ import Foundation
             // Display a synthetic path during Settings captures; no operation uses it.
             model.config.outputRoot = "/Sample/Private Backups"
             await model.refreshConnected()
+            model.useConnectedReaders = true
+            model.selectReader(source.id, role: "source"); model.selectReader(target.id, role: "target")
             for dark in [false, true] {
                 NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
                 for (suffix, width, height) in [("", CGFloat(1120), CGFloat(800)), ("-compact", 940, 680), ("-wide", 1440, 900)] {

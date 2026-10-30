@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 import zipfile
+import shutil
 
 VERSION = 1
 MAX_INPUT = 65536
@@ -94,6 +95,58 @@ def engine():
     return module
 
 
+def device_module():
+    name = "_bridge_reader_devices"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, ROOT / "bridge_devices.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def reader_inventory(m, request):
+    devices = device_module()
+    key = devices.session_key(request.get("readerSession"))
+    fixture = request.get("fixtureRoot")
+    if fixture is None:
+        return devices.discover(m.kobo_mounts(), key)
+    base = sample_base(fixture, workspace(request.get("workspace")))
+    # Fixtures have their own storage/USB graph. Never call host discovery here.
+    attached = base / "Attached"
+    if attached.is_symlink() or not attached.is_dir():
+        raise ProtocolError("Invalid sample reader connections.")
+    records = bounded_json(base / ".bridge-usb.json")
+    if not isinstance(records, list) or len(records) > 32:
+        raise ProtocolError("Invalid sample USB metadata.")
+    result = []
+    mounts = sorted(attached.iterdir())
+    if len(mounts) > 32:
+        raise ProtocolError("Too many sample reader connections.")
+    for mount in mounts:
+        if mount.is_symlink() or not mount.is_dir() or not (mount / ".kobo").is_dir():
+            continue
+        usb = []
+        for entry in records:
+            if not isinstance(entry, dict) or set(entry) != {"volume", "serial", "product", "registry"}:
+                raise ProtocolError("Invalid sample USB record.")
+            if entry["volume"] == mount.name:
+                usb.append({"registry": entry["registry"], "serial": entry["serial"],
+                            "product": entry["product"], "devices": [mount.stat().st_dev]})
+        rows = devices.discover([mount], key, usb=usb)
+        for snapshot in rows:
+            # Display capacities are synthetic too; never publish host free space.
+            snapshot["public"]["freeBytes"] = (12 if mount.name == "Source" else 8) * 1024 ** 3
+            snapshot["public"]["totalBytes"] = (32 if mount.name == "Source" else 16) * 1024 ** 3
+        result.extend(rows)
+    serials = [s["state"]["identity"]["serial"] for s in result]
+    for snapshot, serial in zip(result, serials):
+        if serial and serials.count(serial) > 1:
+            snapshot["public"]["selectable"] = False
+            snapshot["public"]["warning"] = "Two sample volumes have the same identity."
+    return result
+
+
 def workspace(value, create=False):
     if not isinstance(value, str) or not value or len(value) > 4096 or "\x00" in value:
         raise ProtocolError("Choose a valid backup folder.")
@@ -164,7 +217,12 @@ def sample_base(value, project):
 
 
 def connected_readers(m, request):
-    """Read model hints only; never inspect books, fingerprint or assign roles."""
+    """Return bounded read-only connections, retaining the legacy hint-only shape."""
+    if "readerSession" in request:
+        rows = [snapshot["public"] for snapshot in reader_inventory(m, request)]
+        return {"count": len(rows), "modelHint": rows[0]["model"] if len(rows) == 1 else None,
+                "status": "connected" if rows else "none", "synthetic": request.get("fixtureRoot") is not None,
+                "readers": rows, "models": sorted(set(device_module().MODELS.values()))}
     fixture = request.get("fixtureRoot")
     if fixture is not None:
         project = workspace(request.get("workspace"))
@@ -198,7 +256,8 @@ def demo(project):
     for name, role in [("Source", "SOURCE"), ("Target", "TARGET")]:
         mount = base / name
         (mount / ".kobo").mkdir(parents=True)
-        (mount / ".kobo/version").write_text(role + "-SAMPLE,firmware")
+        code = "388" if role == "SOURCE" else "386"
+        (mount / ".kobo/version").write_text(role + "-SAMPLE,1.0,4.0.0,1.0,1.0,00000000-0000-0000-0000-000000000" + code)
         kr = mount / ".adds/koreader"
         (kr / "frontend").mkdir(parents=True)
         (kr / "plugins/sample.koplugin").mkdir(parents=True)
@@ -220,6 +279,13 @@ def demo(project):
     (preview / ".kobo").mkdir(parents=True)
     (preview / ".adds/koreader").mkdir(parents=True)
     (preview / ".adds/koreader/crash.log").write_text("Detected a Kobo Sample Source (synthetic)\n")
+    attached = base / "Attached"
+    attached.mkdir()
+    for name in ["Source", "Target"]:
+        shutil.copytree(base / name, attached / name)
+    (base / ".bridge-usb.json").write_text(json.dumps([
+        {"volume": "Source", "serial": "SOURCE-SAMPLE", "product": 0x4234, "registry": 1},
+        {"volume": "Target", "serial": "TARGET-SAMPLE", "product": 0x4235, "registry": 2}]))
     output = base / "Workspace"
     for index in range(1, 4):
         folder = output / "runs" / ("sample-2024-0" + str(index))
@@ -255,7 +321,7 @@ class EventStream(io.TextIOBase):
 def execute(m, request, project):
     config = request.get("config", {})
     allowed = {"action", "mode", "dryRun", "sourceModel", "targetModel", "locale", "books",
-               "fonts", "readingData", "conflict", "runID", "includeDirs", "excludeDirs", "extensions"}
+               "fonts", "readingData", "conflict", "runID", "includeDirs", "excludeDirs", "extensions", "readers"}
     if not isinstance(config, dict) or set(config) - allowed:
         raise ProtocolError("Unsupported workflow option.")
     action = config.get("action", "migration")
@@ -270,6 +336,17 @@ def execute(m, request, project):
     dry = config.get("dryRun", True)
     if type(dry) is not bool:
         raise ProtocolError("Preview must be a boolean.")
+    bindings = None
+    if "readers" in config and config["readers"] is not None:
+        required = {"source", "target"} if action == "migration" else {"target"}
+        if action == "delete" or not isinstance(config["readers"], dict) or set(config["readers"]) != required:
+            raise ProtocolError("Choose each required reader role before continuing.")
+        bindings = device_module().Bindings(config["readers"], lambda: reader_inventory(m, request))
+        config = dict(config)
+        for role, (_, model) in bindings.roles.items():
+            config[role + "Model"] = model
+        if action == "reuse":
+            config["sourceModel"] = ""  # The verified saved source defines this role.
     args = ["koreader-bridge.py", "--backup-dir", str(project), "--locale", locale]
     if dry:
         args.append("--dry-run")
@@ -358,8 +435,68 @@ def execute(m, request, project):
                     raise ProtocolError("Sample operation escaped its workspace.")
             return original_spinner(cmd, label, env)
         m.run_with_spinner = fixture_spinner
+    if bindings:
+        def checked_role(role):
+            try:
+                return bindings.check(role)
+            except device_module().ReaderError as exc:
+                raise m.MigrationError(str(exc)) from exc
+        def confirm_choice(snapshot, chosen, role):
+            row = snapshot["public"]
+            warning = row["warning"]
+            if not row["model"] or row["model"].casefold() != chosen.casefold():
+                warning += " The selected model overrides automatic identification."
+            if warning and not m.prompt_yes_no(warning + " Confirm the physical " + role.upper() + " is " + chosen + "?", default=False):
+                raise m.MigrationCancelled("Reader model correction was not confirmed.")
+        def check_path(path):
+            try:
+                bindings.check_path(path)
+            except device_module().ReaderError as exc:
+                raise m.MigrationError(str(exc)) from exc
+        def select(role):
+            key = "source" if role == "SOURCE" else "target"
+            snapshot, chosen = checked_role(key)
+            if role == "RESTORE TARGET":
+                confirm_choice(snapshot, chosen, key)
+            return snapshot["mount"]
+        m.wait_for_single_kobo = select
+        original_check, original_eject = m.confirm_device, m.safe_eject
+        def confirmed(path, fingerprint):
+            check_path(path)
+            original_check(path, fingerprint)
+        def eject(path):
+            check_path(path)
+            original_eject(path)
+        m.confirm_device, m.safe_eject = confirmed, eject
+        original_emit, original_input = m.ui_emit, m.ui_input
+        def selected_emit(key, **values):
+            if key in {"workflow.disconnect", "workflow.unplug_source", "saved_source.connect"}:
+                emit("log", text="Using explicitly selected readers. Keep the target connected until the operation finishes.")
+            elif key == "device.log_hint":
+                emit("log", text="Native model metadata and USB connection were checked. Confirm the physical reader; model labels do not establish identity.")
+            elif key == "device.model_mismatch":
+                emit("log", text="Automatic model identification differs from the chosen physical model. Confirm this correction carefully.")
+            else:
+                return original_emit(key, **values)
+        def selected_input(prompt):
+            if getattr(prompt, "key", "") in {"prompt.source", "prompt.target", "prompt.restore_target"}:
+                return ""
+            return original_input(prompt)
+        m.ui_emit, m.ui_input = selected_emit, selected_input
+        original_detect = m.detect_model
+        def native_model(mount):
+            for snapshot, _ in bindings.roles.values():
+                if Path(mount) == snapshot["mount"]:
+                    check_path(mount)
+                    return snapshot["public"]["model"] or original_detect(mount)
+            return original_detect(mount)
+        m.detect_model = native_model
     original_confirm = m.confirm_role_model
     def confirm_model(info, requested, role):
+        if bindings:
+            key = "source" if role == "SOURCE" else "target"
+            snapshot, chosen = checked_role(key)
+            confirm_choice(snapshot, chosen, key)
         confirmed = original_confirm(info, requested, role)
         if role in {"SOURCE", "TARGET"}:
             emit("device", role=role.lower(), model=confirmed)
@@ -391,7 +528,7 @@ def serve():
     try:
         request = read_packet()
         REQUEST_ID = request["id"]
-        if set(request) - {"version", "id", "operation", "workspace", "config", "runID", "keepSuccessful", "fixtureRoot"}:
+        if set(request) - {"version", "id", "operation", "workspace", "config", "runID", "keepSuccessful", "fixtureRoot", "readerSession"}:
             raise ProtocolError("Unknown request field.")
         operation = request.get("operation")
         if operation not in {"health", "devices", "catalog", "details", "cleanup_plan", "create_demo", "execute"}:

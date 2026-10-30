@@ -1,12 +1,22 @@
 # Native desktop acceptance
 
-Development **1.1.0-dev.1** adds the Mac app; historical CLI evidence below remains scoped to its source. See [Mac instructions](docs/MACOS.md).
+Development **1.1.0-dev.2** adds connection-bound reader selection and model correction to the Mac app; historical CLI evidence below remains scoped to its source. See [Mac instructions](docs/MACOS.md).
 
 - Automated: invalid protocol/version/operation, path/symlink refusal, unknown fields, sample confinement, real ditto synthetic transfer/restore, exact cleanup and packaging/privacy.
 - Native: actual app plus bundled Python; save/reopen unknown preferences, preview/FULL/restore/saved-source, both library policies, typed synthetic deletion and final decline.
 - Visual: inspect actual app-window captures in light/dark appearance, sidebar/table/forms, empty/error/loading states, focus/keyboard and minimum-window resizing. Capture only sample content; record any OS capture limitation.
 - User/hardware: native-UI operator sign-off remains pending; automated development does not modify physical readers or delete real recovery data.
 - Distribution: local arm64/macOS14+ app is ad-hoc signed, not notarized. Public app/DMG requires separate review/authorization.
+
+## Connected readers and model correction (KM-026)
+
+Ready for controlled user testing after automated verification; no new physical migration sign-off is implied.
+
+- Connect two readers; select the actual source/target volumes and confirm native/USB model information. Confirm the same physical reader cannot fill both roles.
+- Open Correct model, select a different known model or enter another Kobo model, cancel and confirm separately. Unknown/conflicting identification must require explicit physical-model confirmation; missing/mismatched USB identity must remain blocked.
+- Reconnect or replace a selected reader and verify the old choice cannot start work. Retain verified backups when testing interruptions; do not disconnect a reader during writes as an acceptance experiment.
+- Verify dual-reader preview, source capture, target backups, final confirmation and safe eject with an explicitly approved test target. Preview alone does not approve actual migration. Retest sequential mode and saved-source/restore routing.
+- Check the correction sheet, disconnected state, warnings and menus with keyboard navigation, at minimum/wide window sizes and both appearances. Raw USB serials must not appear in discovery output or screenshots.
 
 # Manual acceptance and sign-off
 
