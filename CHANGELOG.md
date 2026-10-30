@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0-dev.2 — connected reader identities
+
+- Identify connected Kobo models from bounded native version metadata and cross-check USB storage ancestry, product IDs and serials. Use session-scoped opaque connection tokens; expose no raw serials or fingerprints through discovery.
+- Select actual source/target readers with both connected. Revalidate the chosen connection before core write/restore/eject boundaries; reject the same reader, missing USB identity and replaced connections. Preserve sequential mode and existing CLI behavior.
+- Add a physical-model correction sheet and default-No backend confirmation for unknown/conflicting/overridden models. Corrections cannot override identity failures and expire with the connection selection.
+- Exercise dual-reader preview, transfer, saved-source reuse, exact restoration and write-boundary refusal with synthetic USB graphs. Native UI/device migration acceptance remains pending.
+
 ## 1.1.0-dev.1 — native desktop development
 
 - Detect connected Kobo model hints in the idle desktop UI, populate source/target dropdowns, retain choices across reconnects and update labels after core role confirmation. Discovery is read-only and pauses during migration.

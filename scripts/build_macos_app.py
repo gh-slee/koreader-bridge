@@ -18,7 +18,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_INPUTS = [
-    "bridge_desktop_helper.py", "koreader-bridge.py", "kobo-koreader-migrate.py", "LICENSE",
+    "bridge_desktop_helper.py", "bridge_devices.py", "koreader-bridge.py", "kobo-koreader-migrate.py", "LICENSE",
     "README.md", "ACCEPTANCE.md",
     "locales/registry.json", "locales/en.json", "locales/zh-Hant.json", "locales/zh-Hans.json",
     "docs/USAGE.md", "docs/RECOVERY.md", "docs/TROUBLESHOOTING.md", "docs/MACOS.md",
@@ -135,7 +135,7 @@ def build(output_root, runtime_archive=None):
     info = {
         "CFBundleExecutable": "KOReaderBridge", "CFBundleIdentifier": "io.github.gh-slee.koreader-bridge",
         "CFBundleName": "KOReader Bridge", "CFBundleDisplayName": "KOReader Bridge",
-        "CFBundleShortVersionString": "1.1.0", "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.1.0", "CFBundleVersion": "2",
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundleIconFile": "Bridge", "LSMinimumSystemVersion": "14.0",
         "NSHighResolutionCapable": True, "NSPrincipalClass": "NSApplication",
@@ -147,7 +147,7 @@ def build(output_root, runtime_archive=None):
     if not licenses:
         raise ValueError("Runtime license notices are missing.")
     metadata = {
-        "schema_version": 1, "app": "KOReader Bridge", "development_version": "1.1.0-dev.1",
+        "schema_version": 1, "app": "KOReader Bridge", "development_version": "1.1.0-dev.2",
         "architecture": "arm64", "minimum_macos": "14.0", "python": lock,
         "source_inputs": {name: sha(ROOT / name) for name in BACKEND_INPUTS + SWIFT_INPUTS},
         "signing": "ad-hoc local", "notarized": False, "runtime_license_files": len(licenses),

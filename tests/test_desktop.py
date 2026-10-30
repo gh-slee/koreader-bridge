@@ -28,7 +28,8 @@ class DesktopTests(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         self.workspace = self.root / "PrivateOutput"
 
-    def call(self, operation, config=None, fixture=None, run_id=None, decline=False, confirmation=None, **extra):
+    def call(self, operation, config=None, fixture=None, run_id=None, decline=False, confirmation=None,
+             on_prompt=None, decline_model=False, **extra):
         req = {"version": 1, "id": "desktop-test", "operation": operation, "workspace": str(self.workspace)}
         if config is not None:
             req["config"] = config
@@ -59,8 +60,10 @@ class DesktopTests(unittest.TestCase):
                     break
                 events.append(packet)
                 if packet["event"] == "prompt":
+                    if on_prompt is not None:
+                        on_prompt(packet)
                     if packet["kind"] == "boolean":
-                        answer = "n" if decline and packet["key"] == "confirm.migration" else "y"
+                        answer = "n" if (decline and packet["key"] == "confirm.migration") or (decline_model and not packet["key"]) else "y"
                     elif packet["kind"] == "choice":
                         answer = packet["choices"][0]["value"]
                     elif packet.get("requiredText"):
@@ -94,6 +97,91 @@ class DesktopTests(unittest.TestCase):
         if run_id:
             value["runID"] = run_id
         return value
+
+    def bound_config(self, base, dry=True):
+        session = "synthetic-reader-session-integration-1234"
+        result, _ = self.call("devices", fixture=base, readerSession=session)
+        self.assertTrue(result["ok"], result)
+        rows = result["data"]["readers"]
+        by_volume = {row["volume"]: row for row in rows}
+        config = self.config(dry=dry)
+        config["readers"] = {role: {"id": by_volume[name]["id"], "model": by_volume[name]["model"] or "Kobo Sample"}
+                             for role, name in [("source", "Source"), ("target", "Target")]}
+        return config, session, rows
+
+    def test_bound_discovery_returns_two_physical_choices_without_raw_identity(self):
+        base = self.sample(); before = self.tree(base)
+        config, session, rows = self.bound_config(base)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({r["model"] for r in rows}, {"Kobo Libra 2", "Kobo Clara 2E"})
+        self.assertTrue(all(r["usbVerified"] and r["selectable"] for r in rows))
+        self.assertNotIn("SOURCE-SAMPLE", json.dumps(rows))
+        self.assertNotIn("Example.epub", json.dumps(rows))
+        self.assertEqual(self.tree(base), before)
+        result, _ = self.call("devices", fixture=base, readerSession="bad")
+        self.assertFalse(result["ok"])
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Bound workflow uses macOS ditto on isolated readers.")
+    def test_bound_dual_reader_preview_transfer_restore_and_saved_source(self):
+        base = self.sample(); config, session, _ = self.bound_config(base)
+        source, target = base / "Attached/Source", base / "Attached/Target"
+        before_source, before_target = self.tree(source), self.tree(target)
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertEqual(result["data"]["exitCode"], 0, result)
+        self.assertEqual(self.tree(target), before_target)
+        self.assertFalse(any(e.get("key") in {"prompt.source", "prompt.target"} for e in events))
+        config["dryRun"] = False
+        result, _ = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertEqual(result["data"]["exitCode"], 0, result)
+        saved = result["data"]["runID"]
+        self.assertTrue((target / "Books/Example.epub").is_file())
+        self.assertTrue((target / "Books/Keep.txt").is_file())
+        self.assertEqual(self.tree(source), before_source)
+        for action in ["restore", "reuse"]:
+            follow = dict(config, action=action, runID=saved, readers={"target": config["readers"]["target"]})
+            result, _ = self.call("execute", config=follow, fixture=base, readerSession=session)
+            self.assertEqual(result["data"]["exitCode"], 0, result)
+            if action == "restore": self.assertEqual(self.tree(target), before_target)
+
+    def test_bound_roles_refuse_same_stale_or_missing_connections_without_target_writes(self):
+        base = self.sample(); config, session, _ = self.bound_config(base)
+        before = self.tree(base / "Attached/Target")
+        config["readers"]["target"] = config["readers"]["source"]
+        result, _ = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertFalse(result["ok"])
+        config, session, _ = self.bound_config(base)
+        usb = base / ".bridge-usb.json"; rows = json.loads(usb.read_text()); rows[1]["registry"] += 1; usb.write_text(json.dumps(rows))
+        result, _ = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertFalse(result["ok"])
+        self.assertEqual(self.tree(base / "Attached/Target"), before)
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Bound correction uses core macOS preview.")
+    def test_model_override_and_unknown_code_require_default_no_confirmation(self):
+        base = self.sample(); config, session, _ = self.bound_config(base)
+        config["readers"]["source"]["model"] = "Kobo Clara 2E"
+        before = self.tree(base / "Attached/Target")
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session, decline_model=True)
+        self.assertEqual(result["data"]["status"], "cancelled", result)
+        self.assertTrue(any(e.get("kind") == "boolean" and "overrides" in e.get("text", "") for e in events))
+        self.assertEqual(self.tree(base / "Attached/Target"), before)
+        version = base / "Attached/Source/.kobo/version"
+        version.write_text(version.read_text().replace("000000000388", "000000000999"))
+        config, session, _ = self.bound_config(base)
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertEqual(result["data"]["exitCode"], 0, result)
+        self.assertTrue(any("native model code is unknown" in e.get("text", "") for e in events))
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Write-boundary regression uses core macOS backups.")
+    def test_usb_connection_replacement_at_final_confirmation_blocks_writes(self):
+        base = self.sample(); config, session, _ = self.bound_config(base, dry=False)
+        before = self.tree(base / "Attached/Target")
+        def replace(packet):
+            if packet.get("key") == "confirm.migration":
+                p = base / ".bridge-usb.json"; rows = json.loads(p.read_text()); rows[1]["registry"] += 1; p.write_text(json.dumps(rows))
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session, on_prompt=replace)
+        self.assertNotEqual(result["data"]["exitCode"], 0, result)
+        self.assertEqual(self.tree(base / "Attached/Target"), before)
+        self.assertTrue(any("USB connection changed" in e.get("text", "") for e in events))
 
     def tree(self, path):
         return {p.relative_to(path).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()

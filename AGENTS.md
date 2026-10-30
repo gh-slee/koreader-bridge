@@ -25,6 +25,7 @@ This is the shared project guidance for coding agents. Human usage belongs in RE
 
 - Read docs/DESKTOP_ARCHITECTURE.md and docs/MACOS.md. Reuse core validation; IPC must not expose arbitrary code/commands/files.
 - Keep stdout bounded JSON, typed allowlists, request-bound prompts, redaction, private storage and graceful stop. Never force-kill a real writing backend.
+- Connected-reader mode uses bridge_devices.py native metadata, USB storage ancestry and session-bound tokens. Model overrides require explicit confirmation and cannot bypass identity failures. Keep raw serials/fingerprints out of discovery output; revalidate selected connections at core write/restore/eject boundaries. Tests use explicit isolated USB graphs, never host inventory.
 - Build with scripts/build_macos_app.py; verify actual bundled workflows with scripts/verify_macos_app.py and isolated samples. Report automated, launch, visual and hardware/user evidence separately.
 - Bundle explicit sources/pinned runtime only; retain licenses. Ad-hoc is not notarized. Keep binaries/caches/fixtures ignored; public screenshots must be manually inspected sample-only content.
 - Do not rewrite historical release capabilities or GitHub metadata without scoped authorization.

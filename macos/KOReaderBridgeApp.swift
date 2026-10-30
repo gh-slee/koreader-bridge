@@ -55,7 +55,9 @@ struct Workflow: Codable, Sendable {
     var action: String; var mode: String; var dryRun: Bool; var sourceModel: String; var targetModel: String
     var locale: String; var books: Bool; var fonts: Bool; var readingData: Bool; var conflict: String
     var runID: String?; var includeDirs: [String]; var excludeDirs: [String]; var extensions: [String]
+    var readers: [String: ReaderSelection]? = nil
 }
+struct ReaderSelection: Codable, Sendable { let id: String; let model: String }
 struct Request: Encodable, Sendable {
     let version = 1
     let id = UUID().uuidString
@@ -65,6 +67,7 @@ struct Request: Encodable, Sendable {
     var runID: String?
     var keepSuccessful: Int?
     var fixtureRoot: String?
+    var readerSession: String?
 }
 struct RunEntry: Decodable, Identifiable, Hashable, Sendable {
     let id: String; let status: String; let operation: String; let bytes: Int64; let endedAt: String
@@ -76,15 +79,27 @@ struct ConnectedReaders: Decodable {
     let modelHint: String?
     let status: String
     let synthetic: Bool
+    var readers: [ConnectedReader]? = nil
+    var models: [String]? = nil
     var message: String {
         switch status {
-        case "connected": return modelHint ?? "Kobo connected"
+        case "connected": return count == 1 ? "One Kobo connected. Choose its role below." : "\(count) Kobos connected. Choose source and target below."
         case "multiple": return "Multiple Kobos connected. Connect one reader at a time."
         case "unknown": return "Kobo connected. Model hint unavailable; enter the model below."
         case "unavailable": return "Kobo connected. Its model hint cannot be read safely."
         default: return "No Kobo connected. Plug in a reader and choose Connect on its screen."
         }
     }
+}
+struct ConnectedReader: Decodable, Identifiable {
+    let id: String; let volume: String; let model: String?; let nativeModel: String?
+    let modelCode: String?; let usbModel: String?; let usbVerified: Bool
+    let warning: String; let selectable: Bool; let freeBytes: Int64; let totalBytes: Int64
+    var label: String { (model ?? "Unknown Kobo model") + " — " + volume }
+}
+struct ReaderCorrection: Identifiable {
+    let role: String; let readerID: String
+    var id: String { role + readerID }
 }
 struct Health: Decodable { let protocolVersion: Int; let coreVersion: String; let pythonVersion: String }
 struct DemoSession: Decodable { let fixtureRoot: String; let workspace: String }
@@ -289,6 +304,12 @@ struct PreferenceStore {
     @Published var checkingReaders = false
     @Published var readerProblem: String?
     @Published var discoveredModels: [String] = []
+    @Published var useConnectedReaders = true
+    @Published var sourceReaderID = ""
+    @Published var targetReaderID = ""
+    @Published var readerCorrection: ReaderCorrection?
+    @Published var readerApprovals: [String: String] = [:]
+    let readerSession = UUID().uuidString
     let deviceBackend = BackendClient()
     private(set) var preferencesWritable = true
     let backend = BackendClient()
@@ -298,7 +319,57 @@ struct PreferenceStore {
     var declineFinal = false
     var workspace: String { sample?.workspace ?? config.outputRoot }
     var modelOptions: [String] {
-        Array(Set(discoveredModels + [config.sourceModel, config.targetModel]).filter { !$0.isEmpty }).sorted()
+        Array(Set((connected?.models ?? []) + discoveredModels + [config.sourceModel, config.targetModel]).filter { !$0.isEmpty }).sorted()
+    }
+    var readers: [ConnectedReader] { connected?.readers ?? [] }
+    func readerID(_ role: String) -> String { role == "source" ? sourceReaderID : targetReaderID }
+    func chosenModel(_ role: String) -> String { role == "source" ? config.sourceModel : config.targetModel }
+    func reader(_ role: String) -> ConnectedReader? { readers.first { $0.id == readerID(role) } }
+    func selectReader(_ id: String, role: String) {
+        guard !busy else { return }
+        let other = role == "source" ? targetReaderID : sourceReaderID
+        guard id.isEmpty || id != other else { readerProblem = "Source and target must be different readers."; return }
+        if role == "source" { sourceReaderID = id } else { targetReaderID = id }
+        readerApprovals[role] = nil
+        guard let row = reader(role) else { return }
+        if role == "source" { config.sourceModel = row.model ?? "" } else { config.targetModel = row.model ?? "" }
+        if !row.warning.isEmpty || row.model == nil { readerCorrection = ReaderCorrection(role: role, readerID: id) }
+    }
+    func correctModel(_ role: String) {
+        guard let row = reader(role), row.selectable, !busy else { return }
+        readerCorrection = ReaderCorrection(role: role, readerID: row.id)
+    }
+    func confirmModel(_ correction: ReaderCorrection, model: String) {
+        guard let row = reader(correction.role), row.id == correction.readerID, row.selectable else {
+            readerCorrection = nil; readerProblem = "The reader changed. Refresh and choose it again."; return
+        }
+        let value = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.count <= 80 else { return }
+        if correction.role == "source" { config.sourceModel = value } else { config.targetModel = value }
+        readerApprovals[correction.role] = row.id + "|" + value
+        readerCorrection = nil
+    }
+    func boundWorkflow(_ workflow: Workflow) throws -> Workflow {
+        guard useConnectedReaders, workflow.action != "delete" else { return workflow }
+        var result = workflow
+        var roles: [String: ReaderSelection] = [:]
+        for role in workflow.action == "migration" ? ["source", "target"] : ["target"] {
+            guard let row = reader(role), row.selectable else {
+                throw Failure(code: "reader_choice", message: "Choose a connected \(role) reader. Reconnect and select again if it is offline.")
+            }
+            let value = chosenModel(role)
+            guard !value.isEmpty else { throw Failure(code: "reader_model", message: "Choose and confirm the \(role) model.") }
+            if !row.warning.isEmpty || row.model?.caseInsensitiveCompare(value) != .orderedSame {
+                guard readerApprovals[role] == row.id + "|" + value else {
+                    readerCorrection = ReaderCorrection(role: role, readerID: row.id)
+                    throw Failure(code: "reader_confirmation", message: "Confirm the physical \(role) model before continuing.")
+                }
+            }
+            roles[role] = ReaderSelection(id: row.id, model: value)
+        }
+        if roles["source"]?.id == roles["target"]?.id { throw Failure(code: "same_reader", message: "Source and target must be different readers.") }
+        result.readers = roles
+        return result
     }
     var currentRun: RunEntry? { runs.first { $0.id == selectedRun } }
     init() {
@@ -324,7 +395,7 @@ struct PreferenceStore {
         if panel.runModal() == .OK, let url = panel.url { config.outputRoot = url.path; save(); Task { await refresh() } }
     }
     func baseRequest(_ operation: String) -> Request {
-        Request(operation: operation, workspace: workspace, keepSuccessful: config.keepSuccessful, fixtureRoot: sample?.fixtureRoot)
+        Request(operation: operation, workspace: workspace, keepSuccessful: config.keepSuccessful, fixtureRoot: sample?.fixtureRoot, readerSession: readerSession)
     }
     func startup() async {
         do { health = try await backend.call(Request(operation: "health")).decode(Health.self) }
@@ -343,7 +414,7 @@ struct PreferenceStore {
         let fixture = sample?.fixtureRoot
         defer { checkingReaders = false }
         do {
-            let request = Request(operation: "devices", workspace: sample?.workspace, fixtureRoot: fixture)
+            let request = Request(operation: "devices", workspace: sample?.workspace, fixtureRoot: fixture, readerSession: readerSession)
             let response = try await deviceBackend.call(request).decode(ConnectedReaders.self)
             guard !busy && fixture == sample?.fixtureRoot else { return }
             connected = response; readerProblem = nil
@@ -373,12 +444,16 @@ struct PreferenceStore {
             notice = "Sample session: all readers and batches here are synthetic."
             let inventory = try await backend.call(baseRequest("catalog")).decode(RunCatalog.self)
             runs = inventory.runs; reclaimable = inventory.reclaimableBytes
-            connected = nil; discoveredModels = []
+            connected = nil; discoveredModels = []; sourceReaderID = ""; targetReaderID = ""; readerApprovals = [:]
             section = .migration
         } catch { problem = error.localizedDescription }
     }
-    func leaveSample() { guard !busy else { return }; sample = nil; connected = nil; discoveredModels = []; logs = []; notice = ""; Task { await refresh(); await refreshConnected() } }
-    func review(_ workflow: Workflow) { guard !busy else { return }; pendingWorkflow = workflow }
+    func leaveSample() { guard !busy else { return }; sample = nil; connected = nil; discoveredModels = []; sourceReaderID = ""; targetReaderID = ""; readerApprovals = [:]; logs = []; notice = ""; Task { await refresh(); await refreshConnected() } }
+    func review(_ workflow: Workflow) {
+        guard !busy else { return }
+        do { pendingWorkflow = try boundWorkflow(workflow); problem = nil }
+        catch { problem = error.localizedDescription }
+    }
     func receive(_ event: Packet) {
         if event.event == "log", let text = event.text {
             let visible = sample.map { text.replacingOccurrences(of: $0.fixtureRoot, with: "Sample Readers") } ?? text
@@ -503,9 +578,13 @@ struct ReviewView: View {
                 .fixedSize(horizontal: false, vertical: true)
             LabeledContent("Mode", value: workflow.mode.uppercased())
             LabeledContent("Action", value: workflow.dryRun ? "Read-only device preview" : workflow.action.capitalized)
+            if let roles = workflow.readers {
+                if let source = roles["source"] { LabeledContent("Source", value: source.model) }
+                if let target = roles["target"] { LabeledContent("Target", value: target.model) }
+            }
             if let id = workflow.runID { LabeledContent("Batch", value: id) }
             if model.sample != nil { Label("Synthetic sample readers only", systemImage: "testtube.2").foregroundStyle(.teal) }
-            Text("Keep readers disconnected until requested. Connect one at a time and confirm the physical roles and source-build compatibility. A full dry-run may create private local reports, but does not change readers or create backup ZIPs.")
+            Text(workflow.readers != nil ? "These choices are bound to the current USB connections. Keep the target connected; the app rechecks identity before writes. Core role, compatibility, backup and final confirmations still apply." : "Keep readers disconnected until requested. Connect one at a time and confirm the physical roles and source-build compatibility. A full dry-run may create private local reports, but does not change readers or create backup ZIPs.")
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
                 Button("Not now", role: .cancel) { model.pendingWorkflow = nil }.keyboardShortcut(.defaultAction)
@@ -513,6 +592,74 @@ struct ReviewView: View {
                 Button(workflow.dryRun ? "Start preview" : "Continue to core confirmations") { Task { await model.execute(workflow) } }
             }
         }.padding(24).frame(width: 560)
+    }
+}
+struct ReaderCorrectionView: View {
+    @ObservedObject var model: AppModel
+    let correction: ReaderCorrection
+    @State private var choice = ""
+    @State private var custom = ""
+    var value: String {
+        let text = (choice == "__custom" ? custom : choice).trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty || text.lowercased().hasPrefix("kobo ") ? text : "Kobo " + text
+    }
+    var valid: Bool { value.count <= 80 && value.range(of: "^Kobo [A-Za-z0-9][A-Za-z0-9 ._()+-]*$", options: .regularExpression) != nil }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Confirm the physical reader model", systemImage: "exclamationmark.triangle").font(.title2)
+            Text("Check the \(correction.role.uppercased()) reader itself before confirming. A wrong model label can hide a compatibility problem.")
+                .fixedSize(horizontal: false, vertical: true)
+            if let row = model.reader(correction.role) {
+                LabeledContent("Volume", value: row.volume)
+                LabeledContent("Native identification", value: row.nativeModel ?? "Unknown")
+                LabeledContent("USB model", value: row.usbModel ?? "Not uniquely identified")
+                if !row.warning.isEmpty { Text(row.warning).font(.callout).fixedSize(horizontal: false, vertical: true) }
+            }
+            Picker("Correct model", selection: $choice) {
+                Text("Choose a model").tag("")
+                ForEach(model.modelOptions, id: \.self) { Text($0).tag($0) }
+                Text("Other Kobo model…").tag("__custom")
+            }
+            if choice == "__custom" { TextField("Model name", text: $custom, prompt: Text("Kobo model name")).textFieldStyle(.roundedBorder) }
+            Text("This correction applies only to this reader selection. It does not change Kobo files or bypass USB identity, backups or write-time checks.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Cancel", role: .cancel) { model.readerCorrection = nil }.keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Confirm physical model") { model.confirmModel(correction, model: value) }.disabled(!valid)
+            }
+        }.padding(24).frame(width: 560).interactiveDismissDisabled()
+            .onAppear { choice = model.chosenModel(correction.role) }
+    }
+}
+struct ReaderRoleView: View {
+    @ObservedObject var model: AppModel
+    let role: String
+    var title: String { role == "source" ? "Source reader" : "Target reader" }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Picker(title, selection: Binding(get: { model.readerID(role) }, set: { model.selectReader($0, role: role) })) {
+                    Text("Choose \(role) reader").tag("")
+                    if !model.readerID(role).isEmpty && model.reader(role) == nil {
+                        Text("Disconnected — select again").tag(model.readerID(role)).disabled(true)
+                    }
+                    ForEach(model.readers) { row in
+                        Text(row.label).tag(row.id)
+                            .disabled(!row.selectable || row.id == model.readerID(role == "source" ? "target" : "source"))
+                    }
+                }
+                Button("Correct model…") { model.correctModel(role) }.disabled(model.reader(role)?.selectable != true)
+            }
+            if let row = model.reader(role) {
+                Text("Selected model: \(model.chosenModel(role).isEmpty ? "Confirmation needed" : model.chosenModel(role))")
+                    .font(.callout).textSelection(.enabled)
+                Label((row.usbVerified ? "USB identity verified" : "USB identity not verified") + " · " + formattedBytes(row.freeBytes) + " available",
+                      systemImage: row.usbVerified ? "checkmark.shield" : "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(.secondary)
+                if !row.warning.isEmpty { Text(row.warning).font(.callout).fixedSize(horizontal: false, vertical: true) }
+            }
+        }
     }
 }
 extension Workflow: Identifiable { var id: String { action + mode + String(dryRun) + (runID ?? "") } }
@@ -559,20 +706,22 @@ struct MigrationView: View {
                                 .disabled(model.checkingReaders)
                         }
                     }
-                    Picker("Source reader", selection: $model.config.sourceModel) {
-                        Text("Choose source reader").tag("")
-                        ForEach(model.modelOptions, id: \.self) { name in Text(name).tag(name) }
-                    }
-                    Picker("Target reader", selection: $model.config.targetModel) {
-                        Text("Choose target reader").tag("")
-                        ForEach(model.modelOptions, id: \.self) { name in Text(name).tag(name) }
-                    }
-                    DisclosureGroup("Model not listed? Enter it manually") {
+                    Toggle("Choose from connected readers", isOn: $model.useConnectedReaders)
+                    if model.useConnectedReaders {
+                        ForEach(model.readers.filter { !$0.selectable }) { row in
+                            Label(row.volume + ": " + row.warning, systemImage: "exclamationmark.triangle")
+                                .font(.callout).fixedSize(horizontal: false, vertical: true)
+                        }
+                        ReaderRoleView(model: model, role: "source")
+                        ReaderRoleView(model: model, role: "target")
+                        Text("Both readers may stay connected. Choose each role explicitly. Use Correct model if automatic identification is wrong; confirm the physical model in the warning window.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else {
                         TextField("Source model", text: $model.config.sourceModel, prompt: Text("Optional model name"))
                         TextField("Target model", text: $model.config.targetModel, prompt: Text("Optional model name"))
+                        Text("Sequential mode: connect only the requested reader, one at a time. Physical-model confirmations remain required.")
+                            .font(.callout).foregroundStyle(.secondary)
                     }
-                    Text("Detected model hints stay in these menus after unplugging. They may come from copied KOReader logs; confirm each physical reader when prompted. Device fingerprints are checked separately.")
-                        .font(.callout).foregroundStyle(.secondary)
                 }
                 if model.config.mode == "library" {
                     Section("Library options") {
@@ -802,6 +951,7 @@ struct MainView: View {
         }.tint(.teal).frame(minWidth: 940, minHeight: 680)
             .sheet(item: $model.prompt) { PromptView(model: model, prompt: $0) }
             .sheet(item: $model.pendingWorkflow) { ReviewView(model: model, workflow: $0) }
+            .sheet(item: $model.readerCorrection) { ReaderCorrectionView(model: model, correction: $0) }
             .background(WindowLink(model: model))
             .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in Task { await model.refreshConnected() } }
             .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in Task { await model.refreshConnected() } }
