@@ -126,6 +126,13 @@ def usb_inventory():
 
 
 def parse_usb(tree):
+    if not isinstance(tree, list):
+        raise ReaderError("Malformed USB device inventory.")
+    # ioreg -r -c IOUSBHostDevice returns each matching device as a root.
+    # Interface/storage descendants inherit VID/PID/serial properties, but are
+    # not separate readers. Keep their storage ancestry, not their identities.
+    root_ids = {node.get("IORegistryEntryID") for node in tree
+                if isinstance(node, dict) and type(node.get("IORegistryEntryID")) is int}
     records, seen = [], set()
     visited = 0
     def walk(node, depth=0):
@@ -138,7 +145,7 @@ def parse_usb(tree):
                 walk(child, depth + 1)
         elif isinstance(node, dict):
             registry = node.get("IORegistryEntryID")
-            if node.get("idVendor") == 0x2237 and type(registry) is int and registry not in seen:
+            if node.get("idVendor") == 0x2237 and type(registry) is int and registry in root_ids and registry not in seen:
                 seen.add(registry)
                 disks = []
                 def collect(value, level=0):

@@ -130,6 +130,17 @@ class ReaderDeviceTests(unittest.TestCase):
         for _ in range(60): tree = [tree]
         with self.assertRaises(d.ReaderError): d.parse_usb(tree)
 
+    def test_interface_inherited_usb_ids_do_not_create_duplicate_devices(self):
+        interface = {"idVendor": 0x2237, "idProduct": 0x4234, "USB Serial Number": "SAMPLE-ONE",
+                     "IORegistryEntryID": 124, "IOObjectClass": "IOUSBHostInterface",
+                     "IORegistryEntryChildren": [{"BSD Name": "../unsafe"}]}
+        device = {"idVendor": 0x2237, "idProduct": 0x4234, "USB Serial Number": "SAMPLE-ONE",
+                  "IORegistryEntryID": 123, "IOObjectClass": "IOUSBHostDevice",
+                  "IORegistryEntryChildren": [interface]}
+        rows = d.parse_usb([device])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["registry"], 123)
+
 
 if __name__ == "__main__":
     unittest.main()
