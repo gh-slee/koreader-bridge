@@ -115,6 +115,13 @@ import Foundation
             cases.append("malformed-preferences-protected")
             await model.createSample()
             try require(model.sample != nil && model.runs.count == 3 && model.reclaimable > 0, "Sample reader creation or cleanup total failed.")
+            await model.refreshConnected()
+            try require(model.connected?.modelHint == "Kobo Sample Source" &&
+                        model.modelOptions.contains("Kobo Sample Source"), "Connected reader discovery failed.")
+            let savedTarget = model.config.targetModel
+            model.config.sourceModel = model.connected!.modelHint!
+            try require(model.config.targetModel == savedTarget, "Selecting a source changed the target.")
+            cases.append("connected-reader-model-options")
             model.autoReply = true
             let preview = await model.execute(model.config.workflow(dryRun: true))
             try require(preview && model.runs.contains { $0.status == "audited" }, "FULL preview failed.")
@@ -159,6 +166,7 @@ import Foundation
             let storedOutput = model.config.outputRoot
             // Display a synthetic path during Settings captures; no operation uses it.
             model.config.outputRoot = "/Sample/Private Backups"
+            await model.refreshConnected()
             for dark in [false, true] {
                 NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
                 for (suffix, width, height) in [("", CGFloat(1120), CGFloat(800)), ("-compact", 940, 680), ("-wide", 1440, 900)] {

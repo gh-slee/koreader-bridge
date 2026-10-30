@@ -71,6 +71,21 @@ struct RunEntry: Decodable, Identifiable, Hashable, Sendable {
     let targetModified: Bool; let eligible: Bool; let protection: String; let canReuse: Bool; let canRestore: Bool
 }
 struct RunCatalog: Decodable { let runs: [RunEntry]; let reclaimableBytes: Int64 }
+struct ConnectedReaders: Decodable {
+    let count: Int
+    let modelHint: String?
+    let status: String
+    let synthetic: Bool
+    var message: String {
+        switch status {
+        case "connected": return modelHint ?? "Kobo connected"
+        case "multiple": return "Multiple Kobos connected. Connect one reader at a time."
+        case "unknown": return "Kobo connected. Model hint unavailable; enter the model below."
+        case "unavailable": return "Kobo connected. Its model hint cannot be read safely."
+        default: return "No Kobo connected. Plug in a reader and choose Connect on its screen."
+        }
+    }
+}
 struct Health: Decodable { let protocolVersion: Int; let coreVersion: String; let pythonVersion: String }
 struct DemoSession: Decodable { let fixtureRoot: String; let workspace: String }
 struct Choice: Decodable, Identifiable, Sendable { let value: String; let label: String; var id: String { value } }
@@ -81,6 +96,7 @@ struct Failure: Decodable, Error, LocalizedError, Sendable {
 struct Packet: Decodable, Sendable {
     let version: Int; let id: String; let event: String
     var ok: Bool?; var data: JSONValue?; var error: Failure?
+    var role: String?; var model: String?
     var text: String?; var key: String?; var promptID: String?; var kind: String?
     var choices: [Choice]?; var context: [String]?; var requiredText: String?
 }
@@ -174,7 +190,7 @@ final class BackendClient: @unchecked Sendable {
                         while let newline = buffer.firstIndex(of: 10) {
                             let line = Data(buffer[..<newline]); buffer.removeSubrange(...newline)
                             let packet = try JSONDecoder().decode(Packet.self, from: line)
-                            guard packet.version == 1, packet.id == request.id, ["log", "prompt", "result"].contains(packet.event) else {
+                            guard packet.version == 1, packet.id == request.id, ["log", "prompt", "device", "result"].contains(packet.event) else {
                                 throw Failure(code: "protocol", message: "Unexpected response from the bundled backend.")
                             }
                             if packet.event == "result" {
@@ -269,6 +285,11 @@ struct PreferenceStore {
     @Published var health: Health?
     @Published var sample: DemoSession?
     @Published var reclaimable: Int64 = 0
+    @Published var connected: ConnectedReaders?
+    @Published var checkingReaders = false
+    @Published var readerProblem: String?
+    @Published var discoveredModels: [String] = []
+    let deviceBackend = BackendClient()
     private(set) var preferencesWritable = true
     let backend = BackendClient()
     let store: PreferenceStore
@@ -276,6 +297,9 @@ struct PreferenceStore {
     var autoReply = false
     var declineFinal = false
     var workspace: String { sample?.workspace ?? config.outputRoot }
+    var modelOptions: [String] {
+        Array(Set(discoveredModels + [config.sourceModel, config.targetModel]).filter { !$0.isEmpty }).sorted()
+    }
     var currentRun: RunEntry? { runs.first { $0.id == selectedRun } }
     init() {
         let args = CommandLine.arguments
@@ -306,6 +330,25 @@ struct PreferenceStore {
         do { health = try await backend.call(Request(operation: "health")).decode(Health.self) }
         catch { problem = error.localizedDescription }
         await refresh()
+        await refreshConnected()
+    }
+    func refreshConnected() async {
+        guard !busy && !checkingReaders else { return }
+        // Automated verification may never probe physical volumes.
+        if testRoot != nil && sample == nil {
+            connected = ConnectedReaders(count: 0, modelHint: nil, status: "none", synthetic: true)
+            return
+        }
+        checkingReaders = true
+        let fixture = sample?.fixtureRoot
+        defer { checkingReaders = false }
+        do {
+            let request = Request(operation: "devices", workspace: sample?.workspace, fixtureRoot: fixture)
+            let response = try await deviceBackend.call(request).decode(ConnectedReaders.self)
+            guard !busy && fixture == sample?.fixtureRoot else { return }
+            connected = response; readerProblem = nil
+            if let hint = response.modelHint, !discoveredModels.contains(hint) { discoveredModels.append(hint) }
+        } catch { readerProblem = "Could not check connected readers. Try refreshing."; connected = nil }
     }
     func refresh() async {
         guard !busy else { return }
@@ -330,16 +373,20 @@ struct PreferenceStore {
             notice = "Sample session: all readers and batches here are synthetic."
             let inventory = try await backend.call(baseRequest("catalog")).decode(RunCatalog.self)
             runs = inventory.runs; reclaimable = inventory.reclaimableBytes
+            connected = nil; discoveredModels = []
             section = .migration
         } catch { problem = error.localizedDescription }
     }
-    func leaveSample() { guard !busy else { return }; sample = nil; logs = []; notice = ""; Task { await refresh() } }
+    func leaveSample() { guard !busy else { return }; sample = nil; connected = nil; discoveredModels = []; logs = []; notice = ""; Task { await refresh(); await refreshConnected() } }
     func review(_ workflow: Workflow) { guard !busy else { return }; pendingWorkflow = workflow }
     func receive(_ event: Packet) {
         if event.event == "log", let text = event.text {
             let visible = sample.map { text.replacingOccurrences(of: $0.fixtureRoot, with: "Sample Readers") } ?? text
             logs.append(visible); if logs.count > 400 { logs.removeFirst(logs.count - 400) }
             phase = visible
+        } else if event.event == "device", let name = event.model, name.count <= 100 {
+            if event.role == "source" { config.sourceModel = name }
+            else if event.role == "target" { config.targetModel = name }
         } else if event.event == "prompt" {
             if autoReply && sample != nil {
                 let answer: String
@@ -434,7 +481,7 @@ struct PromptView: View {
                     Button("Yes, continue") { model.answer("y") }
                 } else if prompt.packet.kind != "choice" {
                     Button("Continue") { model.answer(input) }
-                        .disabled(prompt.packet.kind == "text" && (!(prompt.packet.requiredText ?? "").isEmpty ? input != prompt.packet.requiredText : input.isEmpty))
+                        .disabled(prompt.packet.kind == "text" && !(prompt.packet.requiredText ?? "").isEmpty && input != prompt.packet.requiredText)
                         .keyboardShortcut(.defaultAction)
                 }
             }
@@ -502,9 +549,29 @@ struct MigrationView: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Section("Reader roles") {
-                    TextField("Source model label", text: $model.config.sourceModel, prompt: Text("Confirm when connected"))
-                    TextField("Target model label", text: $model.config.targetModel, prompt: Text("Confirm when connected"))
-                    Text("Model labels help you recognize the roles. The core still requires physical confirmation and different device fingerprints.")
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label(model.readerProblem ?? model.connected?.message ?? "Checking connected readers…", systemImage: "externaldrive")
+                                .font(.callout).lineLimit(3)
+                            Spacer()
+                            if model.checkingReaders { ProgressView().controlSize(.small) }
+                            Button("Refresh readers") { Task { await model.refreshConnected() } }
+                                .disabled(model.checkingReaders)
+                        }
+                    }
+                    Picker("Source reader", selection: $model.config.sourceModel) {
+                        Text("Choose source reader").tag("")
+                        ForEach(model.modelOptions, id: \.self) { name in Text(name).tag(name) }
+                    }
+                    Picker("Target reader", selection: $model.config.targetModel) {
+                        Text("Choose target reader").tag("")
+                        ForEach(model.modelOptions, id: \.self) { name in Text(name).tag(name) }
+                    }
+                    DisclosureGroup("Model not listed? Enter it manually") {
+                        TextField("Source model", text: $model.config.sourceModel, prompt: Text("Optional model name"))
+                        TextField("Target model", text: $model.config.targetModel, prompt: Text("Optional model name"))
+                    }
+                    Text("Detected model hints stay in these menus after unplugging. They may come from copied KOReader logs; confirm each physical reader when prompted. Device fingerprints are checked separately.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 if model.config.mode == "library" {
@@ -736,6 +803,14 @@ struct MainView: View {
             .sheet(item: $model.prompt) { PromptView(model: model, prompt: $0) }
             .sheet(item: $model.pendingWorkflow) { ReviewView(model: model, workflow: $0) }
             .background(WindowLink(model: model))
+            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in Task { await model.refreshConnected() } }
+            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in Task { await model.refreshConnected() } }
+            .task {
+                while !Task.isCancelled {
+                    await model.refreshConnected()
+                    do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { break }
+                }
+            }
             .task { await model.startup(); if CommandLine.arguments.contains("--integration-test") { await NativeChecks.run(model) } }
     }
 }

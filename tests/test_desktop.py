@@ -106,6 +106,64 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(events, [])
         self.assertFalse(self.workspace.exists())
 
+    def test_connected_preview_is_read_only_and_never_exposes_identity_or_books(self):
+        base = self.sample()
+        reader = base / "Connected/Reader"
+        (reader / ".kobo/version").write_text("SYNTHETIC-PRIVATE-IDENTITY")
+        (reader / "Books").mkdir()
+        (reader / "Books/private-title.epub").write_text("SYNTHETIC BOOK CONTENT")
+        before = self.tree(base)
+        result, events = self.call("devices", fixture=base)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["data"], {"count": 1, "modelHint": "Kobo Sample Source", "status": "connected", "synthetic": True})
+        self.assertEqual(events, [])
+        self.assertNotIn("SYNTHETIC-PRIVATE-IDENTITY", json.dumps(result))
+        self.assertNotIn("private-title", json.dumps(result))
+        self.assertEqual(self.tree(base), before)
+
+    def test_connected_preview_empty_multiple_unknown_and_symlink_states(self):
+        base = self.sample()
+        reader = base / "Connected/Reader"
+        log = reader / ".adds/koreader/crash.log"
+        log.unlink()
+        result, _ = self.call("devices", fixture=base)
+        self.assertEqual(result["data"]["status"], "unknown")
+        outside = self.root / "outside.log"
+        outside.write_text("Detected a Kobo Private Outside (test)")
+        log.symlink_to(outside)
+        result, _ = self.call("devices", fixture=base)
+        self.assertEqual(result["data"]["status"], "unavailable")
+        log.unlink()
+        (base / "Connected/Other/.kobo").mkdir(parents=True)
+        result, _ = self.call("devices", fixture=base)
+        self.assertEqual(result["data"]["status"], "multiple")
+        self.assertIsNone(result["data"]["modelHint"])
+        (base / "Connected/Other/.kobo").rmdir()
+        (reader / ".kobo").rmdir()
+        result, _ = self.call("devices", fixture=base)
+        self.assertEqual(result["data"]["status"], "none")
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Actual reader preview uses macOS tools.")
+    def test_empty_model_choices_use_core_hints_and_still_confirm_roles(self):
+        base = self.sample()
+        before = self.tree(base / "Target")
+        config = self.config()
+        config["sourceModel"] = config["targetModel"] = ""
+        result, events = self.call("execute", config=config, fixture=base)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["data"]["exitCode"], 0)
+        self.assertEqual(sum(e.get("key") == "prompt.physical_model" for e in events), 2)
+        self.assertEqual(sum(e.get("key") == "confirm.device" for e in events), 2)
+        self.assertEqual(self.tree(base / "Target"), before)
+
+    def test_connected_preview_rejects_unmarked_or_escaped_sample(self):
+        base = self.sample()
+        (base / ".bridge-demo.json").unlink()
+        result, _ = self.call("devices", fixture=base)
+        self.assertFalse(result["ok"])
+        result, _ = self.call("devices", fixture=self.root)
+        self.assertFalse(result["ok"])
+
     def test_unknown_version_operation_and_field_refuse(self):
         for values in [{"version": 99}, {"operation": "shell"}, {"unexpected": "ignored?"}]:
             with self.subTest(values=values):
@@ -149,8 +207,10 @@ class DesktopTests(unittest.TestCase):
     def test_actual_core_preview_full_restore_reuse_cancel_and_cleanup(self):
         base = self.sample()
         source_before, target_before = self.tree(base / "Source"), self.tree(base / "Target")
-        result, _ = self.call("execute", config=self.config(), fixture=base)
+        result, events = self.call("execute", config=self.config(), fixture=base)
         self.assertTrue(result["ok"], result)
+        self.assertEqual([(e["role"], e["model"]) for e in events if e["event"] == "device"],
+                         [("source", "Kobo Sample Source"), ("target", "Kobo Sample Target")])
         self.assertEqual(result["data"]["exitCode"], 0, result)
         refreshed, _ = self.call("catalog")
         self.assertEqual(result["data"]["reclaimableBytes"], refreshed["data"]["reclaimableBytes"])

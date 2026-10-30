@@ -2,6 +2,8 @@
 
 ## 1.1.0-dev.1 — native desktop development
 
+- Detect connected Kobo model hints in the idle desktop UI, populate source/target dropdowns, retain choices across reconnects and update labels after core role confirmation. Discovery is read-only and pauses during migration.
+
 - Standardize PR summaries, module breakdowns and evidence categories; validate reviewed Markdown and explicitly replace existing PR descriptions through the publication helper.
 
 - Center backup/cleanup empty states and shared content/footer columns; reflow selected actions and long summaries. Extend actual-app captures to all pages, three window sizes and both appearances. Keep cleanup totals current after sample creation and operations, and pass the chosen retention count consistently to preview and deletion.

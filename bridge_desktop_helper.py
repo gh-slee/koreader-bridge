@@ -148,6 +148,49 @@ def catalog(m, project, keep=2):
     return {"runs": sorted(records, key=lambda x: (x["endedAt"], x["id"]), reverse=True), "reclaimableBytes": plan["reclaimable_bytes"]}
 
 
+def sample_base(value, project):
+    if not isinstance(value, str) or len(value) > 4096 or "\x00" in value:
+        raise ProtocolError("Invalid sample session.")
+    base = Path(value)
+    if base.is_symlink() or base.resolve() != base or project != base / "Workspace" or base.parent.name != "SampleReaders":
+        raise ProtocolError("Invalid sample session.")
+    marker = bounded_json(base / ".bridge-demo.json")
+    if marker != {"schema": 1, "synthetic": True} or base.stat().st_uid != os.getuid():
+        raise ProtocolError("Invalid sample marker.")
+    for name in ["Source", "Target", "Connected"]:
+        if (base / name).is_symlink() or not (base / name).is_dir():
+            raise ProtocolError("Sample readers cannot be symbolic links.")
+    return base
+
+
+def connected_readers(m, request):
+    """Read model hints only; never inspect books, fingerprint or assign roles."""
+    fixture = request.get("fixtureRoot")
+    if fixture is not None:
+        project = workspace(request.get("workspace"))
+        base = sample_base(fixture, project)
+        m.VOLUME_ROOT = base / "Connected"
+    mounts = m.kobo_mounts()
+    if len(mounts) != 1:
+        return {"count": min(len(mounts), 100), "modelHint": None,
+                "status": "none" if not mounts else "multiple", "synthetic": fixture is not None}
+    mount = mounts[0]
+    kr = mount / ".adds" / "koreader"
+    for path in (mount / ".adds", kr, kr / "crash.log", kr / "version.log"):
+        if path.is_symlink():
+            return {"count": 1, "modelHint": None, "status": "unavailable", "synthetic": fixture is not None}
+    try:
+        hint = m.detect_model(mount)
+        if hint is not None:
+            hint = sanitize(hint)
+            if len(hint) > 80 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._()+-]*", hint):
+                hint = None
+    except OSError:
+        hint = None
+    return {"count": 1, "modelHint": hint, "status": "connected" if hint else "unknown",
+            "synthetic": fixture is not None}
+
+
 def demo(project):
     base = project / "SampleReaders" / uuid.uuid4().hex
     base.mkdir(parents=True, mode=0o700)
@@ -165,6 +208,7 @@ def demo(project):
         (kr / "frontend/reader.lua").write_text("return {}")
         (kr / "settings.reader.lua").write_text('return { ["device_id"] = "SAMPLE-' + role + '" }')
         (kr / "history.lua").write_text("return {}")
+        (kr / "crash.log").write_text("Detected a Kobo Sample " + role.title() + " (synthetic)\n")
         (kr / "git-rev").write_text("sample-runtime")
         (mount / "Books").mkdir()
     with zipfile.ZipFile(base / "Source/Books/Example.epub", "w") as z:
@@ -172,6 +216,10 @@ def demo(project):
         z.writestr("META-INF/container.xml", "<container/>")
         z.writestr("chapter.xhtml", "<html><body>Synthetic sample book</body></html>")
     (base / "Target/Books/Keep.txt").write_text("Synthetic target-only content")
+    preview = base / "Connected" / "Reader"
+    (preview / ".kobo").mkdir(parents=True)
+    (preview / ".adds/koreader").mkdir(parents=True)
+    (preview / ".adds/koreader/crash.log").write_text("Detected a Kobo Sample Source (synthetic)\n")
     output = base / "Workspace"
     for index in range(1, 4):
         folder = output / "runs" / ("sample-2024-0" + str(index))
@@ -297,15 +345,7 @@ def execute(m, request, project):
     m.UIOutput.read, m.choose = read, choose
     fixture = request.get("fixtureRoot")
     if fixture is not None:
-        base = Path(fixture)
-        if base.is_symlink() or base.resolve() != base or project != base / "Workspace" or base.parent.name != "SampleReaders":
-            raise ProtocolError("Invalid sample session.")
-        marker = bounded_json(base / ".bridge-demo.json")
-        if marker != {"schema": 1, "synthetic": True} or base.stat().st_uid != os.getuid():
-            raise ProtocolError("Invalid sample marker.")
-        for name in ["Source", "Target"]:
-            if (base / name).is_symlink() or not (base / name).is_dir():
-                raise ProtocolError("Sample readers cannot be symbolic links.")
+        base = sample_base(fixture, project)
         m.VOLUME_ROOT = base / "NeverRealVolumes"
         m.wait_for_single_kobo = lambda role: base / ("Source" if role == "SOURCE" else "Target")
         m.safe_eject = lambda path: emit("log", text="Sample reader disconnected (simulated USB).")
@@ -318,6 +358,13 @@ def execute(m, request, project):
                     raise ProtocolError("Sample operation escaped its workspace.")
             return original_spinner(cmd, label, env)
         m.run_with_spinner = fixture_spinner
+    original_confirm = m.confirm_role_model
+    def confirm_model(info, requested, role):
+        confirmed = original_confirm(info, requested, role)
+        if role in {"SOURCE", "TARGET"}:
+            emit("device", role=role.lower(), model=confirmed)
+        return confirmed
+    m.confirm_role_model = confirm_model
     old_argv = sys.argv
     timer = threading.Timer(86400, lambda: os.kill(os.getpid(), signal.SIGINT))
     timer.daemon = True
@@ -347,11 +394,13 @@ def serve():
         if set(request) - {"version", "id", "operation", "workspace", "config", "runID", "keepSuccessful", "fixtureRoot"}:
             raise ProtocolError("Unknown request field.")
         operation = request.get("operation")
-        if operation not in {"health", "catalog", "details", "cleanup_plan", "create_demo", "execute"}:
+        if operation not in {"health", "devices", "catalog", "details", "cleanup_plan", "create_demo", "execute"}:
             raise ProtocolError("Unsupported operation.")
         m = engine()
         if operation == "health":
             result = {"protocolVersion": VERSION, "coreVersion": m.VERSION, "pythonVersion": sys.version.split()[0]}
+        elif operation == "devices":
+            result = connected_readers(m, request)
         else:
             project = workspace(request.get("workspace"), create=operation in {"create_demo", "execute"})
             if operation in {"catalog", "cleanup_plan"}:

@@ -49,7 +49,7 @@ python3 scripts/build_macos_app.py --launch
 
 The builder prints the exact new `KOReader Bridge.app` path and preserves earlier builds. Its first build downloads a checksum-pinned CPython runtime; later builds reuse the verified cache. The finished app includes Python and launches without shell configuration, an installed Python, network access or an AI service.
 
-- **Migration:** FULL, KOREADER, LIBRARY and AUDIT; preview, progress, reader-role/build confirmations and graceful stop.
+- **Migration:** automatic read-only connection/model-hint updates, source/target dropdowns, FULL/KOREADER/LIBRARY/AUDIT, preview, progress, core confirmations and graceful stop. Model hints remain selectable after unplugging; unknown models can be entered manually.
 - **Backups:** reopen existing CLI output folders, inspect batches/differences, reuse sources and preview/perform exact target restoration.
 - **Cleanup:** eligibility/protection preview; actual deletion requires exact typed confirmation.
 - **Settings:** private output folder, saved workflow choices, core language and retention; unknown preference fields survive.
