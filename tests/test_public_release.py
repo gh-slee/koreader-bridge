@@ -23,6 +23,7 @@ def load_helper(name):
 
 guard = load_helper('check_publication')
 publish = load_helper('publish')
+description = load_helper('check_pr_description')
 
 
 class GenericDeviceTests(base.MigrationTestCase):
@@ -285,7 +286,8 @@ class PublicationTests(unittest.TestCase):
     def test_publish_runs_checks_before_push_and_creates_pr_without_merge(self):
         with tempfile.TemporaryDirectory() as td:
             body = Path(td)/'body.md'
-            body.write_text('Synthetic change. Fixture tests passed; physical acceptance pending.')
+            from test_pr_description import VALID_BODY
+            body.write_text(VALID_BODY)
             def execute(*cmd, capture=False):
                 if cmd[:4] == ('git','symbolic-ref','--quiet','--short'):
                     return 'feature/fixture'
@@ -298,7 +300,7 @@ class PublicationTests(unittest.TestCase):
                 return ''
             with mock.patch('sys.argv', ['publish','--repository','example/tool','--title','Synthetic change','--body-file',str(body)]), \
                  mock.patch.object(publish.shutil, 'which', return_value='/bin/gh'), \
-                 mock.patch.dict(sys.modules, {'check_publication': guard}), \
+                 mock.patch.dict(sys.modules, {'check_publication': guard, 'check_pr_description': description}), \
                  mock.patch.object(publish, 'run', side_effect=execute) as calls:
                 self.assertEqual(publish.main(),0)
             commands = [call.args for call in calls.call_args_list]

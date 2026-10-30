@@ -31,14 +31,19 @@ Before each publication, review the exact staged diff, commit range, destination
 
 GitHub CLI is optional maintainer tooling, unnecessary for migration. Authenticate with its browser/OS credential-store flow. Never print tokens or paste credentials into source, logs, issues or an AI chat.
 
-When authorized to publish a committed, clean feature branch, prepare a reviewed English PR body and run:
+Use the [canonical PR template](../.github/pull_request_template.md) for creation and updates. Build its summary/file groups from the actual base-to-head diff and current behavior. Keep local checks, CI runs, independent QA/reviews and pre-PR validation separate. Link exact CI revisions/runs only after observing them; report pending/not-run/failed checks. Developer self-testing is not independent QA. Handoffs preserve actual commands, counts/skips, review provenance, risks and gaps. Humanizer may improve wording while retaining required headings and evidence.
+
+For this repository, pre-PR evidence covers existing publication/privacy, locales, tests, self-test and applicable native build/launch/visual checks. Record the reviewed revision and any gap; no image gate from another project is implied. Approval and manual/device acceptance requirements remain unchanged. Neither the template nor its structural validator proves factual accuracy or permission.
+
+When authorized to publish a committed, clean feature branch, prepare and validate a reviewed English PR body, then run:
 
 ```bash
+python3 scripts/check_pr_description.py --body-file /tmp/pr-body.md
 python3 scripts/publish.py --repository OWNER/REPO \
   --title "Explain the change" --body-file /tmp/pr-body.md
 ```
 
-Use the exact repository identity shown by origin. The helper checks the destination, branch, clean tree, PR content, privacy, locales, tests and self-test. It performs an ordinary push and creates/reuses an open PR. It never merges, force-pushes or publishes releases. Publication helpers do not replace the operator's authorization requirements.
+Use the exact repository identity shown by origin. The helper checks the destination, branch, clean tree, PR content, privacy, locales, tests and self-test. It freezes validated Markdown bytes in a private temporary file, performs an ordinary push and explicitly passes `--body-file` to create a PR or replace its existing title/body. It never uses autofill. Refresh the complete body after material changes; do not append a session diary. It never merges, force-pushes or publishes releases. Publication helpers do not replace the operator's authorization requirements.
 
 ## Release readiness
 
@@ -113,3 +118,11 @@ Use `--repository gh-slee/koreader-bridge` with `scripts/publish.py`. The active
 GitHub redirects cover web and ordinary Git operations. Do not recreate the old repository slug, because that can remove redirects. GitHub Pages URLs and references to hosted actions/reusable workflows require separate attention if used; this repository currently has no Pages site, consumes external checkout/setup actions and does not expose its own action or reusable workflow.
 
 For any future rename, first review the exact old/new identity, verify availability/admin access, retain repository/ref/issue/PR/release/asset baselines and obtain approval. Rename the existing repository, update remotes/current links and verify continuity, downloads and exact-commit CI afterward. Keep private records and backups local. See [GitHub repository rename documentation](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository) and the [GitHub CLI rename reference](https://cli.github.com/manual/gh_repo_rename). Renaming does not grant permission for a source push, release, device operation or backup cleanup.
+
+## Native app distribution
+
+Build with `python3 scripts/build_macos_app.py`. Maintain `desktop/runtime-lock.json` by reviewing CPython/standalone security and licenses, then updating version, release URL, byte count and SHA-256 together. Never bundle a maintainer's shell Python or personal environment.
+
+Local builds use fresh ignored directories and ad-hoc signing. Public distribution needs an architecture/OS policy, maintained runtime, Developer ID, hardened-runtime/entitlement review, nested signing, notarization/stapling and reviewed DMG/ZIP download verification. Existing outputs/historical releases remain intact.
+
+GitHub About/topics/release descriptions are separate metadata. Audit them, but do not change them without scoped authorization. v1.0.0 predates the native app and remains a CLI release.

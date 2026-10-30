@@ -25,3 +25,9 @@ jobs:
       - run: python koreader-bridge.py --self-test
       - run: python kobo-koreader-migrate.py --version
       - run: python scripts/prepare_release.py prepare --ref HEAD
+
+  native-typecheck:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: xcrun swiftc -swift-version 5 -typecheck -target arm64-apple-macos14.0 -import-objc-header macos/WindowCapture.h macos/KOReaderBridgeApp.swift macos/NativeChecks.swift

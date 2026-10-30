@@ -1,5 +1,17 @@
 # Development guide
 
+## Native desktop development
+
+Current development source is **1.1.0-dev.1**. [Desktop architecture](DESKTOP_ARCHITECTURE.md) describes IPC, storage/lifecycle and safeguards; [Mac instructions](MACOS.md) document local signing and distribution.
+
+```bash
+python3 scripts/build_macos_app.py --launch
+python3 scripts/verify_macos_app.py "/path/to/KOReader Bridge.app"
+xcrun swiftc -swift-version 5 -typecheck -target arm64-apple-macos14.0 -import-objc-header macos/WindowCapture.h macos/KOReaderBridgeApp.swift macos/NativeChecks.swift
+```
+
+Each build uses a fresh ignored output directory; caches/sample batches stay in `.local/`. The app bundles only explicit sources and its pinned runtime, retaining runtime licenses. Actual native integration covers persistence/unknown fields, FULL preview/copy, exact restore, saved-source, both LIBRARY policies, typed sample deletion and final decline. USB discovery/eject is simulated. Report actual app launch, visual inspection and real-user/hardware validation separately.
+
 [Home](../README.md) · [Usage](USAGE.md) · [Recovery](RECOVERY.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Development](DEVELOPMENT.md) · [Maintaining](MAINTAINING.md)
 
 Implementation and verification reference for contributors. Read CONTRIBUTING.md for the review workflow and AGENTS.md for shared agent rules.
@@ -60,7 +72,7 @@ Run scripts/check_locales.py after any catalog/registry change. The published 3.
 
 ## Validation and release status
 
-This source snapshot is **1.0.0**, the first stable compatibility baseline following the published [1.0.0-rc.1](https://github.com/gh-slee/koreader-bridge/releases/tag/v1.0.0-rc.1). It retains both CLI names and the shared implementation; the final version update changes metadata and documentation, not migration algorithms, schemas or safety decisions. Support/validation limits and incomplete physical/manual checks remain explicit follow-up. Every release artifact requires its own exact-commit tests, package verification, CI and publication review; earlier results do not certify later bytes. See the [version policy](MAINTAINING.md#versioning-and-first-stable-release) and [release criteria](../ACCEPTANCE.md#first-stable-release-gates). Old 3.x snapshots remain covered by the existing cross-version regression; real private backups are never test inputs.
+The published CLI **1.0.0** is the first stable compatibility baseline following the published [1.0.0-rc.1](https://github.com/gh-slee/koreader-bridge/releases/tag/v1.0.0-rc.1). It retains both CLI names and the shared implementation; the final version update changes metadata and documentation, not migration algorithms, schemas or safety decisions. Support/validation limits and incomplete physical/manual checks remain explicit follow-up. Every release artifact requires its own exact-commit tests, package verification, CI and publication review; earlier results do not certify later bytes. See the [version policy](MAINTAINING.md#versioning-and-first-stable-release) and [release criteria](../ACCEPTANCE.md#first-stable-release-gates). Old 3.x snapshots remain covered by the existing cross-version regression; real private backups are never test inputs.
 
 RC1 was published on 2026-10-21 from `aaedb78f2b2233ffe91ad42ae8ea9fb312860052`. Its baseline passed 185 tests (including the macOS ditto fixture), self-test, 3x371 locales, privacy/history and documentation checks. All six [exact merged-main CI jobs](https://github.com/gh-slee/koreader-bridge/actions/runs/39527788861) passed. Its independently extracted 35-file package matched Git, and the two uploaded assets were downloaded and verified against the reviewed local bytes. This evidence applies to RC1; later source commits require their own validation and hosted CI. Synthetic checks did not use physical devices or real backups.
 
@@ -178,3 +190,7 @@ Boundary: locale asset validation cannot depend on the catalog it is validating.
 Source-coverage regressions reject uncatalogued runtime exception/status sites and custom parser errors; only blank/decorative print calls are allowed in runtime functions. Minimal module-wrapper fallback output is deliberate. Fixture tests also compare cleanup protection/JSON, warnings, plan/device bytes, malformed ZIP refusal, busy locks, CLI refusal and grouped recovery diagnostics across all three locales. Combined local validation passed 184 tests (nine new), self-test, 3x371 locale checks, worktree/history privacy and whitespace checks, 73 public documentation file links and 30 bash examples. Changed Python parses with 3.9 grammar; new hosted interpreter CI is pending publication. Human wording/hardware acceptance remains separate and deferred to the final combined round.
 
 Editorial policy: preserve SOURCE/TARGET, mode/flag/status/category tokens and exact confirmation syntax; distinguish restoring a saved snapshot from automatic rollback and manual recovery. Review placeholders, negation, retained-versus-overwritten files and action timing in all three catalogs. Each language is maintained independently; script conversion alone is not an accepted review. Additional-language contribution guidance remains KM-017.
+
+### PR authoring handoff
+
+Use the [canonical PR template](../.github/pull_request_template.md) and [maintainer publication workflow](MAINTAINING.md#pr-helper). Supply the actual diff scope, implemented behavior, compatibility, commands/results/skips and independent-review provenance. Keep self-testing, CI and human/hardware acceptance distinct; mark unavailable evidence explicitly. Rebuild the complete description when implementation or review changes. Required structure takes precedence over prose-polishing preferences.

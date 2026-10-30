@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Validate a clean feature branch, push it, and create a PR. Never merges a PR."""
+"""Validate a clean feature branch, push it, and create/update a PR. Never merges a PR."""
 from __future__ import annotations
 import argparse
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,25 +46,42 @@ def main() -> int:
         if not args.body_file.is_file():
             raise ValueError('PR body file is missing.')
         from check_publication import inspect_blob
-        if inspect_blob('README.md', args.body_file.read_bytes()) or inspect_blob('README.md', args.title.encode()):
+        from check_pr_description import MAX_BYTES, validate_body
+        if args.body_file.stat().st_size > MAX_BYTES:
+            raise ValueError('PR body exceeds 64 KiB.')
+        body_bytes = args.body_file.read_bytes()
+        try:
+            issues = validate_body(body_bytes.decode('utf-8'))
+        except UnicodeError as error:
+            raise ValueError('PR body must use UTF-8.') from error
+        if issues:
+            raise ValueError('PR body does not follow the canonical template: ' + ' '.join(issues))
+        if inspect_blob('README.md', body_bytes) or inspect_blob('README.md', args.title.encode()):
             raise ValueError('PR title/body failed the publication content check; redact private values.')
         run(sys.executable, 'scripts/check_publication.py', '--history')
         run(sys.executable, 'scripts/check_locales.py')
         run(sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_*.py')
         run(sys.executable, 'koreader-bridge.py', '--self-test')
         run('gh', 'auth', 'status')
-        # No force flag, branch deletion, merge or release creation.
-        run('git', 'push', '--set-upstream', 'origin', branch)
-        existing = run('gh', 'pr', 'list', '--repo', args.repository, '--head', branch,
-                       '--base', args.base, '--state', 'open', '--json', 'url', '--jq', '.[0].url // empty', capture=True)
-        if existing:
-            print('Existing PR: ' + existing)
-        else:
-            run('gh', 'pr', 'create', '--repo', args.repository, '--head', branch,
-                '--base', args.base, '--title', args.title, '--body-file', str(args.body_file.resolve()))
+        # Freeze validated bytes; source Markdown can change during long checks.
+        with tempfile.TemporaryDirectory(prefix='koreader-pr-') as temporary:
+            frozen = Path(temporary) / 'body.md'
+            frozen.write_bytes(body_bytes)
+            frozen.chmod(0o600)
+            # No force flag, branch deletion, merge or release creation.
+            run('git', 'push', '--set-upstream', 'origin', branch)
+            existing = run('gh', 'pr', 'list', '--repo', args.repository, '--head', branch,
+                           '--base', args.base, '--state', 'open', '--json', 'url', '--jq', '.[0].url // empty', capture=True)
+            if existing:
+                run('gh', 'pr', 'edit', existing, '--repo', args.repository,
+                    '--title', args.title, '--body-file', str(frozen))
+                print('Updated existing PR: ' + existing)
+            else:
+                run('gh', 'pr', 'create', '--repo', args.repository, '--head', branch,
+                    '--base', args.base, '--title', args.title, '--body-file', str(frozen))
         print('Await human sign-off before merging.')
         return 0
-    except (ValueError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f'Publish stopped: {error}', file=sys.stderr)
         return 1
 

@@ -1,6 +1,6 @@
 # Agent instructions
 
-This is the shared project guidance for coding agents. Human usage belongs in README.md; contribution workflow belongs in CONTRIBUTING.md. The product is a macOS Python 3.9+ CLI using only the standard library, JSON locale catalogs and unittest; Linux CI checks fixtures only.
+This is the shared project guidance for coding agents. Human usage belongs in README.md; contribution workflow belongs in CONTRIBUTING.md. The product has a SwiftUI/AppKit Mac app and compatible Python 3.9+ standard-library CLI. The app uses bundled pinned CPython and bounded JSON IPC; Linux CI checks fixtures only.
 
 ## Find task context
 
@@ -20,6 +20,14 @@ This is the shared project guidance for coding agents. Human usage belongs in RE
 - Keep normal cancellation distinct from migration and recovery errors. Do not selectively preserve hardware settings or merge reading metadata without an implemented, tested policy.
 - Use koreader-bridge.py as the canonical CLI; retain kobo-koreader-migrate.py as the shared engine and compatible legacy entry. Keep both files and locales together. Both entries must share run roots, locks, safety decisions and exit handling. Record versions in code/logs/JSON; generated data stays in runs/<run-id>/ under the selected project root.
 - Runtime UI after locale loading uses explicit catalog IDs for owned errors/prompts/progress/warnings/cleanup reasons and custom parser checks. Keep exception args, saved warning/reason strings, machine tokens and diagnostic logs English. Preserve structured children through diagnostic_detail/join_diagnostics; never infer IDs from rendered text. Raw external diagnostics, Python parser/traceback text and locale-bootstrap failures are deliberate original-text boundaries. Human wording/hardware acceptance remains pending.
+
+## Native desktop
+
+- Read docs/DESKTOP_ARCHITECTURE.md and docs/MACOS.md. Reuse core validation; IPC must not expose arbitrary code/commands/files.
+- Keep stdout bounded JSON, typed allowlists, request-bound prompts, redaction, private storage and graceful stop. Never force-kill a real writing backend.
+- Build with scripts/build_macos_app.py; verify actual bundled workflows with scripts/verify_macos_app.py and isolated samples. Report automated, launch, visual and hardware/user evidence separately.
+- Bundle explicit sources/pinned runtime only; retain licenses. Ad-hoc is not notarized. Keep binaries/caches/fixtures ignored; public screenshots must be manually inspected sample-only content.
+- Do not rewrite historical release capabilities or GitHub metadata without scoped authorization.
 
 ## Verify changes
 
@@ -43,5 +51,7 @@ python3 scripts/check_publication.py --worktree --history
 - Keep credentials, books, device data, runs and local instructions out of Git. Stage explicit public paths; inspect staged blobs and reachable history with the publication guard.
 - Obtain appropriate user authorization before external publication or other consequential actions. Use a feature branch and PR; no automatic merge, force push, remote deletion or release publishing.
 - Before a permitted push, verify origin and use scripts/publish.py with the exact OWNER/REPO and a reviewed English PR body. Never bypass a failing publication guard.
+- Every PR creation or description update follows the [canonical template](.github/pull_request_template.md). Derive it from the actual base-to-head diff and current implementation/docs/evidence. Keep focused bullets, meaningful module summaries and separate local/CI/independent-review/pre-PR status. Humanizer wording edits preserve required structure, facts, risks and uncertainty.
+- Validate the final Markdown with scripts/check_pr_description.py --body-file before submission; pass those exact reviewed bytes with gh pr create/edit --body-file or an explicit API body. Never use commit-message autofill. Replace the complete body after material changes. Handoffs supply actual commands, revisions/results/skips, review provenance and gaps; self-tests are not independent QA. No new agent roles, device authority or approval exceptions are implied.
 - Start fresh sessions in the repository. Use the [session verification prompt](docs/DEVELOPMENT.md#fresh-session-verification); distinguish discovered instructions from explicit reads and static checks from actual session/worktree tests. Verify destination branch and guidance after a worktree transfer.
 - If delegation is requested, give each agent a bounded task and the applicable instructions/context; do not assume every tool inherits the parent's full conversation. Delegation does not broaden permissions.

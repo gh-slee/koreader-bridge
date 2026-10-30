@@ -1,3 +1,13 @@
+# Native desktop acceptance
+
+Development **1.1.0-dev.1** adds the Mac app; historical CLI evidence below remains scoped to its source. See [Mac instructions](docs/MACOS.md).
+
+- Automated: invalid protocol/version/operation, path/symlink refusal, unknown fields, sample confinement, real ditto synthetic transfer/restore, exact cleanup and packaging/privacy.
+- Native: actual app plus bundled Python; save/reopen unknown preferences, preview/FULL/restore/saved-source, both library policies, typed synthetic deletion and final decline.
+- Visual: inspect actual app-window captures in light/dark appearance, sidebar/table/forms, empty/error/loading states, focus/keyboard and minimum-window resizing. Capture only sample content; record any OS capture limitation.
+- User/hardware: native-UI operator sign-off remains pending; automated development does not modify physical readers or delete real recovery data.
+- Distribution: local arm64/macOS14+ app is ad-hoc signed, not notarized. Public app/DMG requires separate review/authorization.
+
 # Manual acceptance and sign-off
 
 This source snapshot is **1.0.0**, continuing the published [1.0.0-rc.1](https://github.com/gh-slee/koreader-bridge/releases/tag/v1.0.0-rc.1). The implementation continues the [3.3.0-dev.6 experimental package](https://github.com/gh-slee/koreader-bridge/releases/tag/v3.3.0-dev.6), published on 2026-10-19. A KOREADER transfer from that package passed full manifest verification, TARGET identity preservation and safe eject; startup and opening an existing TARGET book were explicitly confirmed. FULL preview safely refused insufficient space before writes. These are scoped results, not ticket-wide or all-device sign-off. The release criteria below distinguish required artifact/publication review from broader acceptance follow-up. Earlier recovery evidence remains historical. Private device reports/backups stay local. See the [numbering policy](docs/MAINTAINING.md#versioning-and-first-stable-release).
