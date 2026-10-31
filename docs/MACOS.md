@@ -1,13 +1,47 @@
 # KOReader Bridge for macOS
-Development SwiftUI app for the existing offline Kobo migration core.
+
+The SwiftUI app uses the existing offline Kobo migration core.
+
+## Build and launch
+
 Build: python3 scripts/build_macos_app.py
-The builder prints a fresh .app path and preserves older builds. Open that .app in Finder or use open with its printed path.
-Requires Apple Silicon and macOS 14+. Building needs Apple command-line Swift tools, Python 3.9+, and a first-build download of the checksum-pinned CPython runtime. Launching needs no shell Python or network.
-Migration automatically refreshes connected readers. With Choose from connected readers enabled, both Kobos may stay connected. Each menu selects a physical connection, labelled with its model and volume; selecting the same reader for both roles is refused. Native version metadata identifies the model, while the macOS USB storage graph and serial comparison bind it to the mounted reader. Volume names and plug order do not establish identity.
-Use Correct model… when automatic identification is unknown or wrong. The sheet shows native and USB model information, provides known models and manual entry, and requires physical-model confirmation. An execution-time default-No confirmation also protects unknown/conflicting/overridden labels. A model correction cannot bypass missing/mismatched USB identity, source/target separation, compatibility or backup requirements. Connection choices and correction approvals are session-only; disconnecting/reconnecting or changing identity requires selecting again. Saved model labels do not silently restore an approval.
-Disable Choose from connected readers for the original sequential workflow: connect only the requested reader, one at a time, and enter the physical model when requested. The CLI retains this workflow and its existing safeguards. Connected-reader mode requires readable native identity plus a verified USB-to-volume association; when those cannot be established, reconnect or use sequential mode rather than overriding identity.
-Use Migration to choose scope and preview changes. In connected-reader mode, Preview changes starts a read-only plan directly. Start migration opens one review with physical roles, scope and an unchecked source-build compatibility acknowledgement for FULL/KOREADER. Identity defaults to keeping TARGET identity or generating one if absent; optional new/clone choices are under KOReader identity options, and cloning needs a separate acknowledgement. Back up and prepare captures and verifies required archives automatically, then Ready to migrate shows the selected roles and asks for final write consent. Return defaults to Cancel migration. Unknown/conflicting/manual models still require explicit confirmation. Sequential mode, restore and typed deletion retain their original prompts. Source capture still produces verified local archives before target writes; the app safely ejects each reader after its phase. Backups shows existing batches; choose a private existing CLI output folder in Settings to reopen them. Saved-source reuse and exact-target restore use the selected target in connected-reader mode; original snapshot identity checks still apply. Cleanup previews protection before deletion and requires exact typed confirmation.
-Try sample readers creates explicitly synthetic data in a separate private workspace; Leave sample session returns to the real output folder. Sample readers do not access USB volumes.
-Preferences save to the current account's Application Support/KOReader Bridge. Unknown preference fields are retained. The selected output folder holds runs/<run-id>/ using existing CLI schemas. Keep these folders private; backups can contain credentials and reading history.
-Settings → Language switches the native interface immediately between English, Traditional Chinese and Simplified Chinese and saves that choice for reopening. New core operations use the selected language; existing activity remains in its original language. Raw external/technical diagnostics, model names, batch IDs and paths are not translated. Runtime/build details are visible in Settings.
-Local builds are ad-hoc signed, not Developer ID signed or notarized. They are development builds, not an App Store or public DMG release. Public distribution requires a maintained runtime update process, Developer ID, hardened-runtime review, signing nested code, notarization/stapling, release verification and controlled hardware acceptance. Intel packaging is not implemented.
+
+The builder prints the path to a new .app and keeps older builds. Open the app in Finder or use open with the printed path.
+
+The app requires Apple Silicon and macOS 14+. To build it, you also need Apple command-line Swift tools and Python 3.9+. The first build downloads a CPython runtime and verifies its pinned checksum. The finished app includes Python and can launch without a network connection or shell Python.
+
+## Choose readers
+
+The Migration page refreshes connected readers automatically. Enable Choose from connected readers to keep both Kobos connected and select their roles from the menus. Each entry shows its model and volume. The app refuses to use the same reader for both roles.
+
+Native version metadata identifies the model. The macOS USB storage graph and serial comparison associate it with the mounted reader. Volume names and plug order do not prove identity.
+
+If identification is wrong or unknown, choose Correct model…. The sheet shows native and USB information and lets you select a known model or enter one. You must confirm the physical model. Unknown, conflicting or overridden labels also require confirmation during execution, with No as the default.
+
+A model correction cannot bypass missing or mismatched USB identity, separate source and target roles, build compatibility or backups. Reader selections and correction approvals last only for the session. Reconnecting or changing identity requires a fresh selection; a saved model label does not restore approval.
+
+To use the original sequential workflow, disable Choose from connected readers. Connect only the requested reader, one at a time, and enter its physical model when asked. The CLI keeps this workflow and its safeguards. Connected-reader mode needs readable native identity and a verified USB-to-volume association. If either is unavailable, reconnect or use sequential mode; changing the model label cannot establish identity.
+
+## Review and migrate
+
+Preview changes starts a read-only plan directly in connected-reader mode. Start migration opens a review of the physical roles and scope. FULL/KOREADER also require you to acknowledge that the source KOReader build can run on the target; the checkbox starts unchecked.
+
+By default, the app keeps TARGET identity or creates one if it is missing. KOReader identity options also lets you generate a new identity or clone the source. Cloning needs a separate acknowledgement.
+
+Back up and prepare captures and verifies the required archives automatically. Ready to migrate then shows the selected roles and asks for permission to write. Pressing Return selects Cancel migration. Unknown, conflicting and manually corrected models still need explicit confirmation. Sequential mode, restoration and typed deletion keep their original prompts.
+
+The app verifies source archives before target writes and safely ejects each reader after its phase. Backups lists existing batches. Choose a private existing CLI output folder in Settings to reopen them. Saved-source reuse and exact-target restore use the selected target in connected-reader mode, with the original snapshot identity checks. Cleanup shows protection rules before deletion and requires exact typed confirmation.
+
+## Samples, storage and language
+
+Try sample readers creates synthetic data in a separate private workspace without accessing USB volumes. Leave sample session returns to the real output folder.
+
+Preferences are saved in the current account's Application Support/KOReader Bridge. Unknown fields are preserved. The selected output folder stores runs/<run-id>/ using the existing CLI schemas. Keep these folders private: backups can contain credentials and reading history.
+
+Settings → Language switches the interface immediately between English, Traditional Chinese and Simplified Chinese. The app remembers the choice when reopened. New core operations use that language; existing activity keeps its original language. External and technical diagnostics, model names, batch IDs and paths stay unchanged. Settings also shows runtime and build details.
+
+## Distribution status
+
+Local builds use ad-hoc signing and have no Developer ID signature or notarization. They are development builds; there is no App Store or public DMG release. Intel packaging is not implemented.
+
+Public distribution still requires a maintained runtime update process, Developer ID, hardened-runtime review, signing of nested code, notarization and stapling, release verification and controlled hardware acceptance.

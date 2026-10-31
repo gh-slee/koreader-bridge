@@ -2,11 +2,11 @@
 
 Current source uses `koreader-bridge.py`; the adjacent `kobo-koreader-migrate.py` remains the shared engine and compatible CLI. Keep both and the locale assets in distributions. Test both entry names when changing startup, locking or packaging.
 
-Start with README.md for usage and AGENTS.md for shared development guidance. Use TRACKER.md when planning features and ACCEPTANCE.md for manual verification. Public code, comments and canonical developer documentation use English; owned user-facing translations belong in reviewed locale catalogs.
+Read README.md for usage and AGENTS.md for development rules. Check TRACKER.md before planning a feature, and use ACCEPTANCE.md for manual tests. Write public code, comments and canonical developer documentation in English. Put translated interface text in the reviewed locale catalogs.
 
 ## Runtime requirements
 
-All features must run as standalone offline code. AI-assisted development is welcome, but the released tool must not depend on inference APIs, downloaded models, model servers, agent frameworks or an active assistant session.
+Every feature must work as standalone offline code. You may use AI while developing it. Users must not need inference APIs, downloaded models, model servers, agent frameworks or an active assistant session to run the tool.
 
 Preserve the existing mode semantics and data protections described in AGENTS.md. Use disposable synthetic devices and never execute device Lua. Fixture tests do not authorize physical-device operations or real backup deletion.
 
@@ -40,7 +40,7 @@ Keep private data and local instructions out of Git. Review staged content and r
 
 ## Reporting and licensing
 
-Report the tool/macOS/Python versions, mode, expected behavior and a minimal synthetic reproduction or redacted message. Do not attach actual books, serials, settings, databases, raw logs, manifests or archives. Follow SECURITY.md for sensitive findings.
+When reporting a problem, include the tool, macOS and Python versions, the mode and what you expected to happen. Provide a small synthetic reproduction or a redacted message. Keep actual books, serials, settings, databases, raw logs, manifests and archives out of the report. Follow SECURITY.md for sensitive findings.
 
 Contributions are under the MIT License. Do not add copied KOReader/device assets or third-party books/fonts/plugins.
 
@@ -52,7 +52,7 @@ Preserve CLI behavior/schemas and core validation. Add malformed-input and workf
 
 ## Pull request descriptions
 
-Use the [canonical PR template](.github/pull_request_template.md) for new PRs and updates. Lead with the problem/result, then focused bullets. Summarize meaningful files/modules with repository-relative paths. Separate local checks, remote CI, independent reviews and required pre-PR validation; give actual status and disclose missing evidence. Keep compatibility, material risks and reviewer focus when relevant. UI evidence must be synthetic and current. Omit unused conditional sections and keep small changes short.
+Use the [canonical PR template](.github/pull_request_template.md) when opening or updating a PR. Start with the problem and resulting behavior, then explain the changes in a few focused bullets. Group related files and use repository-relative paths. Report local checks, remote CI, independent review and required pre-PR validation separately, including checks that have not run. Include compatibility details, material risks and reviewer guidance where needed. UI evidence must show current synthetic data. Remove unused optional sections; a small change should have a short description.
 
 Validate the final body with `python3 scripts/check_pr_description.py --body-file /tmp/pr-body.md`. Pass the same complete Markdown through `--body-file`; do not rely on commit-message autofill. Editorial/Humanizer guidance cannot remove required sections or weaken technical precision. This structure does not certify claims or grant publication permission.
 

@@ -12,7 +12,7 @@ Use `koreader-bridge.py` as the canonical entry while retaining `kobo-koreader-m
 
 ## Mandatory runtime requirement (all tickets)
 
-Every current and future feature must be implemented as ordinary executable code that users can run directly from Terminal without any LLM. Do not depend on AI inference APIs, local/remote model servers, model downloads, an agent framework, or an active Codex/ChatGPT session. LLMs may assist authoring and maintenance only.
+Users must be able to run every current and future feature directly from Terminal as ordinary code. Runtime features must not depend on AI inference APIs, local or remote model servers, model downloads, an agent framework or an active Codex/ChatGPT session. LLM assistance is limited to authoring and maintenance.
 
 Acceptance for every ticket must include standalone CLI operation without AI API keys/services, explicit algorithmic rules, and documented commands/ordinary user confirmations where needed. Preserve the offline core migration/maintenance workflow. Copying existing KOReader AI-plugin files does not authorize executing them.
 
@@ -45,11 +45,11 @@ Scope is the existing four modes, migration/backup/recovery safeguards and three
 
 ## Device-support roadmap
 
-The broader name describes the project direction, not delivered multi-device support. Non-Kobo work is queued after the Kobo first-stable milestone and requires its own implementation scope.
+Support for other device families is planned after the first stable Kobo milestone. Each platform needs a defined implementation scope; the broader project name does not mean that support is already available.
 
-1. **KM-021 — Feasibility and support matrix:** research candidate device families, including Kindle, then choose the first platform and explicit migration directions. Record access/installation prerequisites, supported versions, host transport, runtime locations, identities, metadata and evidence gaps.
-2. **KM-022 — Portable data and platform safeguards:** define what can move between device families, what must remain on TARGET and which combinations must be refused. Do not assume copying a complete Kobo runtime is safe on another family. Preserve existing exact Kobo FULL/KOREADER semantics; new policies must be explicit. Coordinate with KM-007/008/009 for metadata/hardware/settings handling.
-3. **KM-023 — First non-Kobo adapter:** platform and supported directions remain to be selected after KM-021/022. Implement ordinary offline code, synthetic fixtures and controlled hardware acceptance, including capacity, backup, identity, path, rollback and restore behavior. Update user docs/support matrix only after the implemented scope is validated.
+1. **KM-021: Feasibility and support matrix:** research candidate device families, including Kindle, then choose the first platform and explicit migration directions. Record access/installation prerequisites, supported versions, host transport, runtime locations, identities, metadata and evidence gaps.
+2. **KM-022: Portable data and platform safeguards:** define what can move between device families, what must remain on TARGET and which combinations must be refused. Do not assume copying a complete Kobo runtime is safe on another family. Preserve existing exact Kobo FULL/KOREADER semantics; new policies must be explicit. Coordinate with KM-007/008/009 for metadata/hardware/settings handling.
+3. **KM-023: First non-Kobo adapter:** platform and supported directions remain to be selected after KM-021/022. Implement ordinary offline code, synthetic fixtures and controlled hardware acceptance, including capacity, backup, identity, path, rollback and restore behavior. Update user docs/support matrix only after the implemented scope is validated.
 
 No Kindle support, platform priority, delivery date or complete cross-platform migration guarantee is implied by these tickets. Add other device families through separately scoped tickets. Existing Kobo migration must remain available and its pending acceptance must not be marked complete by this roadmap.
 
@@ -141,7 +141,7 @@ Status: KM-013 locale foundation is implemented in 3.3.0-dev.1 and Ready for tes
 | Traditional Chinese | zh-Hant | Initial Traditional Chinese interface, shared across supported regional aliases. |
 | Simplified Chinese | zh-Hans | Separately reviewed Simplified Chinese interface. |
 
-This is a proposed initial product scope, not a claim about market popularity. Use script tags rather than equating a script with a single country. Traditional and Simplified Chinese require independent wording review; do not publish an automatic character-conversion output as an accepted translation.
+These languages define the proposed initial scope; they were not selected as a market-popularity ranking. Use script tags because a script can be used in several countries. Review Traditional and Simplified Chinese wording independently. Automatic character conversion does not count as an accepted translation.
 
 Code, comments, identifiers and canonical developer documentation use English. Reviewed catalogs can localize owned user-facing text. Tool-owned diagnostic log messages remain English.
 
@@ -273,12 +273,12 @@ Do not auto-enable every JSON file found in locales/. Additional languages, righ
 - W3C language tags explain language/script/region distinctions and BCP 47 conventions: https://www.w3.org/International/articles/language-tags/
 - Python format-string syntax informs the deliberately restricted named-placeholder validator: https://docs.python.org/3.12/library/string.html#format-string-syntax
 
-These references inform the design; this plan chooses source-reviewable JSON catalogs rather than requiring compiled gettext .mo files.
+The design draws on these references and uses JSON catalogs that reviewers can read directly. Compiled gettext .mo files are not required.
 
 
 ## Documentation organization
 
-README.md is the concise entry point for installation, essential mode/data behavior, supported platforms, partial locale status and document navigation. Complete user, recovery, troubleshooting, developer and maintainer details now live in five topic guides under docs/. Shared AGENTS.md remains the agent entry point; this organization introduces no new agent-memory convention or migration runtime behavior.
+README.md covers installation, essential mode and data behavior, supported platforms, partial locale status and links to other docs. Five guides under docs/ cover usage, recovery, troubleshooting, development and maintenance in detail. Agents start with AGENTS.md. This organization changes neither agent-memory conventions nor migration behavior.
 
 The publication allowlist adds only the five exact reviewed Markdown paths; other docs/data paths remain blocked and all guide content still receives secret/path scanning. A regression covers both allowed paths and rejection of unknown/private paths or private content. Local validation passed: 117 tests, self-test, three-locale validation, 99 documentation link targets and 27 shell examples, plus worktree/history privacy and whitespace checks. Migration runtime and locale assets are unchanged. These results cover the local documentation batch; hosted CI for it requires publication. Physical/manual acceptance status is unchanged.
 
@@ -287,7 +287,7 @@ The publication allowlist adds only the five exact reviewed Markdown paths; othe
 
 Following PR #1, the default main checkout contains the complete implementation. Installation, CI badge scope, contributor base-branch instructions and release-preparation guidance now target main. This is a documentation-only correction; runtime/catalog behavior and all pending human acceptance tickets remain unchanged. Local checks passed: 100 document link targets, 27 shell examples, live main CI badge, publication privacy/history and whitespace. Runtime, catalogs, scripts and tests are unchanged; the full fixture suite was not repeated for this documentation-only correction.
 
-## KM-014 slice 1 — shared output routing
+## KM-014 slice 1: shared output routing
 
 Status: Ready for controlled testing as a scoped part of In progress KM-014, development 3.3.0-dev.3. The published 3.3.0-dev.2 ZIP/tag is unchanged. Adds explicit message-ID/parameter contracts, scoped console/English-log rendering, shared confirmations/progress/run/catalog/cleanup/difference labels, additive ui_locale metadata and 94 extracted entries per locale. Typed input rules and data/decision schemas stay stable; no LLM or network dependency.
 
@@ -295,7 +295,7 @@ The remaining message inventory is in docs/DEVELOPMENT.md. At slice 1, menus and
 
 Local slice validation passed 154 tests (16 new UI routing/workflow cases), self-test, 3x94 locale validation and worktree/history privacy checks. Slice 1 merged as PR #6 and main CI 39179925642 passed all six jobs; manual translation/hardware acceptance remains pending. These results do not change older tickets to Done.
 
-## KM-014 slice 2 — menus and basic inspection
+## KM-014 slice 2: menus and basic inspection
 
 Status: Ready for controlled testing as part of In progress KM-014, development 3.3.0-dev.4. Adds translated mode/identity/conflict menus, physical-model hints/confirmation and basic device/space summaries, including a LIBRARY capacity line. Adds 37 entries per locale (131 total) with explicit placeholder contracts. The plugin-specific configuration indicator is removed from console/logs; legacy saved metadata, generic plugin audits and whole-runtime verification remain compatible. Existing defaults, retries, model/fingerprint checks, space formulas and all device decisions remain unchanged.
 
@@ -303,7 +303,7 @@ Detailed errors, metadata/plugin diagnostics, raw diagnostic labelling and remai
 
 Slice 2 merged as PR #7 after 166 local tests/3x131 locale checks and all 12 push/PR jobs passed. All six [merged-main jobs](https://github.com/gh-slee/koreader-bridge/actions/runs/39183640983) also passed. This establishes automated evidence for slice 2 only; human wording review and hardware acceptance remain pending.
 
-## KM-014 slice 3 — workflow, recovery and selected refusals
+## KM-014 slice 3: workflow, recovery and selected refusals
 
 Status: Ready for controlled testing as part of In progress KM-014, development 3.3.0-dev.5. Adds 117 IDs (248 entries per locale) for migration/saved-source/target-restore plans, backup/verification/eject/identity notices, archive heartbeats, recovery guidance, five cancellation reasons and 36 selected refusals. Structured exceptions keep English string args; display rendering uses IDs and labels raw unconverted details without replacing text.
 

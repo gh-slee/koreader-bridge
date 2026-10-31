@@ -15,13 +15,13 @@ Each build uses a fresh ignored output directory; caches/sample batches stay in 
 
 [Home](../README.md) · [Usage](USAGE.md) · [Recovery](RECOVERY.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Development](DEVELOPMENT.md) · [Maintaining](MAINTAINING.md)
 
-Implementation and verification reference for contributors. Read CONTRIBUTING.md for the review workflow and AGENTS.md for shared agent rules.
+Read CONTRIBUTING.md for the review workflow and AGENTS.md for agent rules. This guide covers implementation and verification.
 
 The canonical entry loads the existing engine through an explicit adjacent-file import, preserving argv and cwd. Both entries call the shared cli() exception/exit boundary, resolve the same script-relative run root and use identical project/device locks. Locale validation also loads that engine through the canonical entry. AST/source-coverage tests intentionally inspect the shared engine; its cli() fallback is the explicit English process boundary. Historical records and lock/output prefixes are not renamed.
 
 ## Tech stack
 
-The runtime is a Python CLI, with no third-party Python packages, hosted backend or model service.
+The CLI uses Python's standard library. It needs no third-party Python packages, hosted backend or model service.
 
 | Layer | Technology | Role |
 | --- | --- | --- |
@@ -71,7 +71,7 @@ Tests use temporary synthetic devices and mock USB/eject operations. On macOS, a
 
 Reader discovery tests supply an isolated USB storage graph. Cover native/USB agreement, shared/unknown product codes, manual model corrections, serial mismatch, duplicate roles, unsafe identity files, reconnection tokens and identity replacement at the final write boundary. Native checks drive actual selection/correction state and dual-reader synthetic workflows through the bundled helper. Do not use host ioreg or physical readers as automated fixtures. Model mappings are offline interoperability facts; references are the current Calibre Kobo driver and koboutils device table, with newer hardware revisions reviewed separately. A known name is not hardware migration certification.
 
-Add meaningful tests for changed behavior and safety boundaries. Documentation-only work needs relative-link/anchor checks, CLI/example verification, shell syntax checks and publication privacy review. The publication helper independently runs its mandatory full checks before uploading.
+Add tests for the behavior and safety boundaries you change. For documentation-only work, check relative links and anchors, verify CLI examples and shell syntax, and review publication privacy. Before uploading, the publication helper runs its required full checks independently.
 
 Run scripts/check_locales.py after any catalog/registry change. The published 3.3.0-dev.6 and current candidate catalogs each contain 371 extracted message entries (36 in the historical 3.3.0-dev.2 foundation); validation does not substitute for human translation review. Keep mode tokens, flags, JSON schemas and destructive confirmation semantics language-independent.
 
@@ -95,7 +95,7 @@ New changes require fresh validation. Temporary fixtures and the real macOS ditt
 
 ## Coding agents
 
-The root [AGENTS.md](../AGENTS.md) is the shared source of agent guidance using the [AGENTS.md open format](https://agents.md/). Keep it concise and link task-specific documentation rather than duplicating it in multiple vendor rule files. Contributors remain responsible for understanding, testing and reviewing AI-assisted changes.
+Keep shared agent rules in the root [AGENTS.md](../AGENTS.md), using the [AGENTS.md open format](https://agents.md/). Keep the file short and link to task-specific docs instead of repeating them in vendor rule files. Contributors must understand, test and review AI-assisted changes.
 
 For personal Codex defaults, use its documented user-level AGENTS.md. For private project-specific instructions, Codex supports a Git-ignored AGENTS.override.md. At one directory level, Codex selects the override instead of AGENTS.md; a local override must explicitly read the public AGENTS.md to retain this project's shared rules. This is a Codex feature, not a universal private-file standard. See [official instruction discovery](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
 
@@ -137,7 +137,7 @@ After creating a local managed worktree, verify its ignored guidance and current
 
 Canonical documentation, owned public code, comments and docstrings use English. Preserve original license terms, attribution and quoted source/user text. Locale catalogs, multilingual regression fixtures and necessary compatibility strings are intentional exceptions. Do not change stored application data or remove supported languages to eliminate non-English characters. Review translated heading anchors and executable examples when translating documentation.
 
-There is no automated English-language guard. A CJK search can help review canonical prose, but cannot prove English grammar or translation accuracy; blanket non-ASCII bans would also reject valid names, symbols and localization fixtures.
+There is no automated English-language guard. A CJK search can flag passages for review, but it cannot assess English grammar or translation accuracy. Do not ban all non-ASCII text: valid names, symbols and localization fixtures need it.
 
 ## Feature and locale work
 

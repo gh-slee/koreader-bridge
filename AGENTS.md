@@ -1,6 +1,6 @@
 # Agent instructions
 
-This is the shared project guidance for coding agents. Human usage belongs in README.md; contribution workflow belongs in CONTRIBUTING.md. The product has a SwiftUI/AppKit Mac app and compatible Python 3.9+ standard-library CLI. The app uses bundled pinned CPython and bounded JSON IPC; Linux CI checks fixtures only.
+These instructions apply to coding agents. Read README.md for usage and CONTRIBUTING.md for the contribution workflow. KOReader Bridge has a SwiftUI/AppKit Mac app and a compatible Python 3.9+ standard-library CLI. The app bundles pinned CPython and uses bounded JSON IPC. Linux CI checks fixtures only.
 
 ## Find task context
 
@@ -44,8 +44,8 @@ python3 scripts/check_publication.py --worktree --history
 
 - Exercise both CLI names and cross-entry saved-run/restore compatibility when changing startup or packaging. Preserve historical package verification, archive bytes and lock identities.
 - Use disposable temporary fixtures. Tests have no authorization to access physical Kobos or delete real recovery data. Run the macOS ditto fixture when changing archive/restore behavior.
-- Match validation to the change. For documentation-only work, check links, CLI examples and privacy; do not repeat unrelated runtime tests without a reason.
-- Report observed evidence and remaining limits. Fixture/CI success is not physical-device validation. Keep acceptance tickets Ready for test until human sign-off.
+- Run checks that cover the change. Documentation-only work needs link, CLI example and privacy checks; repeat runtime tests only when the change gives you a reason.
+- Report what you observed and what remains unverified. Fixture and CI results do not validate physical devices. Keep acceptance tickets Ready for test until a human signs off.
 
 ## Deliver and publish
 

@@ -2,7 +2,7 @@
 
 [Home](../README.md) · [Usage](USAGE.md) · [Recovery](RECOVERY.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Development](DEVELOPMENT.md) · [Maintaining](MAINTAINING.md)
 
-Keep recovery artifacts until you have checked the result on the actual TARGET. Management commands operate on local run batches; restoration still requires the original device and final confirmation.
+Keep your recovery files until you have checked the result on TARGET. Management commands work on local batches. Restoring a batch still requires the original device and final confirmation.
 
 ## Run files, reports and status
 
@@ -32,7 +32,7 @@ runs/                    private; ignored by Git
 .local/                   optional private notes; ignored by Git
 ```
 
-Not every operation creates every artifact. A dry run creates reports but no ZIPs. Files within one batch are intentionally flat for compatibility with earlier runs. The version is recorded in logs/JSON, not in the script filename.
+The files in a batch depend on the operation. A dry run creates reports without ZIPs. Each batch uses a flat layout to stay compatible with earlier runs. Logs and JSON records contain the version; the script filename stays the same.
 
 Choose a different output root on the Mac:
 
@@ -61,7 +61,7 @@ Progress output includes phase timestamps, file counts, bytes, large-file transf
 | `needs-recovery` | Target may have changed and needs inspection/recovery. |
 | legacy/unknown | No trustworthy modern status; conservatively protected. |
 
-Project and device locks use OS-backed ownership. A leftover lock **filename** does not mean another worker is running: locks release when the process exits. Do not delete a live lock file to bypass ownership. Prior unfinished `running` records are reconciled conservatively at the next exclusive project startup. Older v3.0.x workers do not honour these locks; stop them before running newer versions.
+The operating system owns project and device locks and releases them when the process exits. A leftover lock **filename** therefore does not mean a worker is still running. Never delete a live lock file to bypass its owner. At the next exclusive project startup, the tool checks unfinished `running` records and reconciles them conservatively. Stop older v3.0.x workers before starting a newer version; they do not honour these locks.
 
 ## Version numbering and existing backups
 
@@ -103,7 +103,7 @@ python3 koreader-bridge.py --restore-run RUN_ID --dry-run
 python3 koreader-bridge.py --restore-run RUN_ID
 ```
 
-This uses a previous run's **TARGET pre-migration snapshot**, not its SOURCE snapshot. It restores the recorded originals and removes files that the recorded migration created. Unrelated library files are retained. If the run replaced KOReader, restoration replaces the full KOReader tree with its prior backup.
+Restoration uses the previous run's **TARGET pre-migration snapshot**. It restores recorded originals and removes files created by that migration, while retaining unrelated library files. If the run replaced KOReader, restoration replaces the whole KOReader tree with its previous backup. The SOURCE snapshot is used for a new migration, not this restore.
 
 Exact restoration requires v3.1+ `target-snapshot.json`, `target-changes.json`, a run that modified its target, verified archive pairs and the same device fingerprint. Older target backups without a complete journal are not accepted by this command. The tool creates pre-restore undo backups and asks for final confirmation. Subsequent changes to the affected paths/runtime can be overwritten by restoring an older state; inspect the dry run first.
 

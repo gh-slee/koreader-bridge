@@ -2,7 +2,7 @@
 
 [Home](../README.md) · [Usage](USAGE.md) · [Recovery](RECOVERY.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Development](DEVELOPMENT.md) · [Maintaining](MAINTAINING.md)
 
-Repository publication and release-preparation reference. These procedures do not grant authority to upload data, merge changes or publish a release.
+Use this guide to prepare repository changes and releases. You still need authorization before uploading data, merging changes or publishing a release.
 
 ## Publication privacy
 
@@ -29,11 +29,11 @@ Before each publication, review the exact staged diff, commit range, destination
 
 ## PR helper
 
-GitHub CLI is optional maintainer tooling, unnecessary for migration. Authenticate with its browser/OS credential-store flow. Never print tokens or paste credentials into source, logs, issues or an AI chat.
+Maintainers can use GitHub CLI; migration does not need it. Sign in through its browser and OS credential-store flow. Never print tokens or paste credentials into source, logs, issues or an AI chat.
 
 Use the [canonical PR template](../.github/pull_request_template.md) for creation and updates. Build its summary/file groups from the actual base-to-head diff and current behavior. Keep local checks, CI runs, independent QA/reviews and pre-PR validation separate. Link exact CI revisions/runs only after observing them; report pending/not-run/failed checks. Developer self-testing is not independent QA. Handoffs preserve actual commands, counts/skips, review provenance, risks and gaps. Humanizer may improve wording while retaining required headings and evidence.
 
-For this repository, pre-PR evidence covers existing publication/privacy, locales, tests, self-test and applicable native build/launch/visual checks. Record the reviewed revision and any gap; no image gate from another project is implied. Approval and manual/device acceptance requirements remain unchanged. Neither the template nor its structural validator proves factual accuracy or permission.
+Before opening a PR, report the publication and privacy checks, locales, tests, self-test and any required native build, launch and visual checks. Name the reviewed revision and explain gaps. This project does not inherit an image approval requirement from another project. Existing approval and manual/device acceptance rules still apply. The template and its validator check structure; they cannot verify claims or grant permission.
 
 When authorized to publish a committed, clean feature branch, prepare and validate a reviewed English PR body, then run:
 
@@ -43,7 +43,7 @@ python3 scripts/publish.py --repository OWNER/REPO \
   --title "Explain the change" --body-file /tmp/pr-body.md
 ```
 
-Use the exact repository identity shown by origin. The helper checks the destination, branch, clean tree, PR content, privacy, locales, tests and self-test. It freezes validated Markdown bytes in a private temporary file, performs an ordinary push and explicitly passes `--body-file` to create a PR or replace its existing title/body. It never uses autofill. Refresh the complete body after material changes; do not append a session diary. It never merges, force-pushes or publishes releases. Publication helpers do not replace the operator's authorization requirements.
+Use the repository identity shown by origin. The helper checks the destination, branch, working-tree cleanliness, PR content, privacy, locales, tests and self-test. It saves the validated Markdown in a private temporary file and performs a normal push. It passes `--body-file` explicitly when creating a PR or replacing its title and body, without autofill. Replace the complete description after material changes; keep session notes out of it. The helper cannot merge, force-push or publish releases, and it does not replace the operator's approval requirements.
 
 ## Release readiness
 
@@ -91,7 +91,7 @@ Reverify later using the printed directory and an independently chosen expected 
 python3 scripts/prepare_release.py verify DIRECTORY --ref COMMIT
 ```
 
-Verification re-reads Git, checks the ZIP and checksum/record, rejects missing/extra/duplicate members and reruns the extracted checks. It does not trust a replaced checksum or preparation record as proof of provenance. It requires the local Git objects; it is not the standalone Kobo-backup verifier planned as KM-010. For a downloaded release, `shasum -a 256 -c SHA256SUMS` only detects a mismatch with the accompanying checksum, not publisher authenticity.
+Verification reads Git again, checks the ZIP against its checksum and record, rejects missing, extra or duplicate members, and reruns the extracted checks. A replaced checksum or preparation record cannot establish provenance on its own. Local Git objects are required. KM-010 tracks a separate standalone Kobo-backup verifier. For downloaded releases, `shasum -a 256 -c SHA256SUMS` detects mismatches with the supplied checksum; it does not authenticate the publisher.
 
 CI runs preparation for its checked-out commit on all supported fixture hosts and Python versions. It does not upload packages or publish releases. Human publication review must still cover release notes, public metadata, exact commit/assets and remaining acceptance limitations. The helper does not generate or publish release notes, create tags, push branches or access the network/devices. Upload only the reviewed ZIP and checksum; keep PREPARATION.json local. A published pre-release invites controlled testing and is distinct from stable-release acceptance.
 

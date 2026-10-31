@@ -2,7 +2,7 @@
 
 [Home](../README.md) · [Usage](USAGE.md) · [Recovery](RECOVERY.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Development](DEVELOPMENT.md) · [Maintaining](MAINTAINING.md)
 
-Use the recorded phase and run status to identify the problem. Preserve backups when recovery is uncertain; do not bypass identity, archive or path checks.
+Check the recorded phase and run status first. If recovery is uncertain, keep the backups. Do not bypass identity, archive or path checks to continue.
 
 ## Common messages
 
@@ -20,11 +20,11 @@ Use the recorded phase and run status to identify the problem. Preserve backups 
 | Device changed/disconnected | Stop. Reconnect the original device and inspect the run/backups. The tool refuses rollback onto a different device. |
 | `needs-recovery` | Keep all artifacts. Reconnect the original TARGET; inspect reports and try a verified `--restore-run ... --dry-run` if a complete modern snapshot exists. Otherwise recover manually from backups. |
 
-Caught copy/restore/verification failures attempt automatic rollback while the original TARGET remains connected. Rollback cannot guarantee recovery after power loss, forced termination, hardware failure or disconnection. A checksum verifies the captured bytes, not the meaning or compatibility of settings.
+When copying, restoration or verification fails, the tool attempts automatic rollback while the original TARGET is connected. Power loss, forced termination, hardware failure or disconnection can prevent recovery. A checksum checks the captured bytes; it cannot tell whether settings make sense or are compatible.
 
 ## Exit codes
 
-Exit codes: `0` means success, completed audit/preview or ordinary cancellation; consult `run.json` to distinguish them. `1` means an error (a target may need recovery if the run says so). `2` means failed operation with successful rollback, or an argument-parser usage error before a run. `3` means failed/incomplete rollback; recovery is needed. `130` means an uncaught user interruption. Interrupted copying caught inside a transaction may instead return the rollback code.
+Exit code `0` covers success, a completed audit or preview, and ordinary cancellation; check `run.json` for the result. Code `1` indicates an error; the run record tells you whether TARGET may need recovery. Code `2` means an operation failed and rolled back successfully, or the argument parser rejected a command before a run began. Code `3` means rollback failed or is incomplete and recovery is needed. Code `130` records an uncaught user interruption. An interruption caught during copying inside a transaction may return the rollback code instead.
 
 ## Reporting a problem
 

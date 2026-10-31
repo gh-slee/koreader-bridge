@@ -35,7 +35,7 @@
 
 ## macOS app
 
-KOReader Bridge now has a native SwiftUI interface backed by the same migration engine as the CLI. Configure migrations, inspect batches, reuse a saved source, restore a target snapshot and review cleanup. Connected-reader migrations combine choices in one review, prepare verified backups automatically and stop once more before writing. Identity checks and recovery behavior remain active.
+The SwiftUI app uses the same migration engine as the CLI. You can configure a migration, inspect backup batches, reuse a saved source, restore a target snapshot or review cleanup. For connected readers, the app collects your choices in one review, prepares and verifies backups, then asks before writing. It checks device identity throughout and keeps the existing recovery protections.
 
 ![Native KOReader Bridge app with synthetic sample readers](assets/desktop/migration-light.png)
 
@@ -47,16 +47,16 @@ Requires **Apple Silicon, macOS 14+**, Apple command-line Swift tools and Python
 python3 scripts/build_macos_app.py --launch
 ```
 
-The builder prints the exact new `KOReader Bridge.app` path and preserves earlier builds. Its first build downloads a checksum-pinned CPython runtime; later builds reuse the verified cache. The finished app includes Python and launches without shell configuration, an installed Python, network access or an AI service.
+The builder prints the path to the new `KOReader Bridge.app` and keeps earlier builds. On the first build, it downloads CPython and checks it against a pinned checksum. Later builds reuse that verified download. Python is included in the finished app, so you can launch it without configuring a shell, installing Python or connecting to a network or AI service.
 
-- **Migration:** native model identification and USB identity checks, actual connected-reader source/target dropdowns, FULL/KOREADER/LIBRARY/AUDIT, preview, progress, consolidated review and graceful stop. Both readers can stay connected; sequential connection remains available. **Correct model…** opens a physical-model confirmation sheet for wrong/unknown identification. A correction cannot bypass identity checks; reconnecting requires a fresh selection.
-- **Migration review:** for explicitly selected connected readers, confirm the roles, scope and KOReader compatibility in one sheet; keep the target identity by default (create one if absent). After verified backups, **Migrate now** authorizes writing; Return defaults to **Cancel migration**. Preview starts directly. Model exceptions, restore and deletion still require their own confirmations.
-- **Backups:** reopen existing CLI output folders, inspect batches/differences, reuse sources and preview/perform exact target restoration.
-- **Cleanup:** eligibility/protection preview; actual deletion requires exact typed confirmation.
-- **Settings:** private output folder, saved workflow choices, interface/operation language and retention; unknown preference fields survive.
-- **Sample readers:** opt-in synthetic devices and batches in a separate private workspace. No physical reader is accessed.
+- Migration: native model identification and USB identity checks, actual connected-reader source/target dropdowns, FULL/KOREADER/LIBRARY/AUDIT, preview, progress, consolidated review and graceful stop. Both readers can stay connected; sequential connection remains available. **Correct model…** opens a physical-model confirmation sheet for wrong/unknown identification. A correction cannot bypass identity checks; reconnecting requires a fresh selection.
+- Migration review: for explicitly selected connected readers, confirm the roles, scope and KOReader compatibility in one sheet; keep the target identity by default (create one if absent). After verified backups, **Migrate now** authorizes writing; Return defaults to **Cancel migration**. Preview starts directly. Model exceptions, restore and deletion still require their own confirmations.
+- Backups: reopen existing CLI output folders, inspect batches/differences, reuse sources and preview/perform exact target restoration.
+- Cleanup: eligibility/protection preview; actual deletion requires exact typed confirmation.
+- Settings: private output folder, saved workflow choices, interface/operation language and retention; unknown preference fields survive.
+- Sample readers: opt-in synthetic devices and batches in a separate private workspace. No physical reader is accessed.
 
-The native interface and new core operations support English, Traditional Chinese and Simplified Chinese. Change **Settings → Language** for an immediate interface switch; the choice persists when reopening. Existing activity, external diagnostics, model names and user paths retain their original text. Preferences/default data use the current account's Application Support/KOReader Bridge; existing CLI defaults and schemas are unchanged.
+Choose English, Traditional Chinese or Simplified Chinese in **Settings → Language**. The interface changes immediately, and the app remembers your choice when you reopen it. New operations use that language; existing activity, external diagnostics, model names and paths keep their original text. The app stores preferences and default data in the current account's Application Support/KOReader Bridge. CLI defaults and data schemas are unchanged.
 
 Local builds are **ad-hoc signed, not notarized**. Intel packaging and a public signed DMG are not implemented. See [Mac instructions](docs/MACOS.md), [architecture](docs/DESKTOP_ARCHITECTURE.md) and [security](SECURITY.md). The existing [v1.0.0 release](https://github.com/gh-slee/koreader-bridge/releases/tag/v1.0.0) remains the historical CLI distribution.
 
@@ -81,7 +81,7 @@ Local builds are **ad-hoc signed, not notarized**. Intel packaging and a public 
 
 ## Device support
 
-**Kobo → Kobo is the only currently supported device migration direction.** KOReader Bridge is the new project name; support for additional KOReader devices is future work. The name does not imply compatibility with every device that runs KOReader.
+KOReader Bridge currently supports **Kobo → Kobo migration only**. Support for other KOReader devices is planned; those devices cannot yet be used as migration sources or targets.
 
 | Device migration | Status | Host and limits |
 | --- | --- | --- |
@@ -131,7 +131,7 @@ python3 koreader-bridge.py --list-locales
 python3 koreader-bridge.py --locale zh-Hant --preview-ui
 ```
 
-These help/list/preview commands do not inspect devices or existing run data and do not create migration logs/backups. The UI preview is a static sample, separate from device inspection with `--dry-run`.
+These commands show help, list languages or display a static UI sample. They do not inspect devices or existing runs, and they create no migration logs or backups. Use `--dry-run` to inspect an actual device plan.
 
 ### 3. Preview a migration
 
@@ -141,7 +141,7 @@ The introductory commands use KOREADER, the mode with scoped hardware confirmati
 python3 koreader-bridge.py --mode koreader --dry-run
 ```
 
-A dry run reads both devices and creates local reports/locks, but changes no Kobo files and creates no ZIP backups. Review the plan. When ready to migrate, rerun without `--dry-run`; the tool recalculates the plan and asks for final confirmation:
+A dry run reads both devices and creates local reports and locks. It leaves Kobo files unchanged and creates no ZIP backups. Review the plan, then rerun without `--dry-run` when you are ready. The tool calculates a fresh plan and asks for final confirmation:
 
 ```bash
 python3 koreader-bridge.py --mode koreader
@@ -258,7 +258,7 @@ The reset changes version metadata, not CLI flags, migration behavior, backup sc
 
 ## Contributing
 
-Focused fixes, documentation improvements, synthetic regressions and locale-preview feedback are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md); coding agents use the shared [AGENTS.md](AGENTS.md) open format. AI-assisted contributions remain the contributor's responsibility, and all runtime features must remain standalone offline code.
+Contributions can include focused fixes, clearer documentation, synthetic regression tests or feedback on translated previews. Read [CONTRIBUTING.md](CONTRIBUTING.md). Coding agents should follow the shared [AGENTS.md](AGENTS.md) open format. Contributors are responsible for reviewing AI-assisted work; every runtime feature must work as standalone offline code.
 
 Report reproducible bugs and feature requests through [GitHub Issues](https://github.com/gh-slee/koreader-bridge/issues). Follow [SECURITY.md](SECURITY.md) for sensitive findings; never attach books, raw backups or unredacted device data.
 
@@ -266,4 +266,4 @@ Report reproducible bugs and feature requests through [GitHub Issues](https://gi
 
 Built for readers using [KOReader](https://github.com/koreader/koreader) on Kobo devices. Thanks to the KOReader community and this project's [contributors](https://github.com/gh-slee/koreader-bridge/graphs/contributors).
 
-This tool is under the [MIT License](LICENSE). The existing copyright notice retains the contributor name from the project's earlier name, Kobo KOReader Migration. Device software, plugins, fonts and books retain their own licences. This is an independent community tool, not an official Kobo or KOReader project.
+The tool uses the [MIT License](LICENSE). Its copyright notice retains the contributor name used when the project was called Kobo KOReader Migration. Device software, plugins, fonts and books keep their own licences. KOReader Bridge is an independent community project with no official affiliation to Kobo or KOReader.
