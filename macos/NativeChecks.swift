@@ -11,6 +11,11 @@ import Foundation
         if !condition { throw Failure(code: "native_test", message: message) }
     }
     static func snapshot(_ name: String, root: URL) async throws {
+        // SwiftUI presents sheets on a later run-loop turn.
+        for _ in 0..<20 {
+            if captureWindow(name) != nil { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
         guard let window = captureWindow(name),
               let view = window.contentView else { throw Failure(code: "snapshot", message: "No rendered app window.") }
         window.deminiaturize(nil)
