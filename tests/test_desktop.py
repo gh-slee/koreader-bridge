@@ -225,6 +225,7 @@ class DesktopTests(unittest.TestCase):
         _, events = self.call("execute", config=config, fixture=base, readerSession=session)
         self.assertTrue(any(e.get("key") == "confirm.continue" for e in events))
 
+    @unittest.skipUnless(platform.system() == "Darwin", "Reviewed preview enters the macOS-only core workflow.")
     def test_reviewed_readonly_preview_needs_no_compatibility_or_write_prompt(self):
         base = self.sample(); config, session, _ = self.bound_config(base)
         self.reviewed(config, compatible=False); before = self.tree(base / "Attached/Target")
@@ -232,6 +233,18 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(result["data"]["exitCode"], 0, result)
         self.assertFalse(any(e["event"] == "prompt" for e in events))
         self.assertEqual(self.tree(base / "Attached/Target"), before)
+
+    @unittest.skipIf(platform.system() == "Darwin", "Exercises the unsupported-host guard.")
+    def test_reviewed_preview_on_unsupported_host_refuses_without_reader_changes(self):
+        base = self.sample(); config, session, _ = self.bound_config(base)
+        self.reviewed(config, compatible=False)
+        before = self.tree(base / "Attached")
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertNotEqual(result["data"]["exitCode"], 0, result)
+        self.assertIsNone(result["data"]["runID"])
+        self.assertFalse(any(e["event"] == "prompt" for e in events))
+        self.assertTrue(any("macOS" in e.get("text", "") for e in events))
+        self.assertEqual(self.tree(base / "Attached"), before)
 
     @unittest.skipUnless(platform.system() == "Darwin", "Saved-source review uses isolated macOS archives.")
     def test_reviewed_saved_source_reuses_only_target_choice_and_keeps_final_consent(self):
@@ -263,6 +276,7 @@ class DesktopTests(unittest.TestCase):
         result, _ = self.call("devices", fixture=base, readerSession="synthetic-warning-session-integration-1234")
         self.assertTrue(all(not r["selectable"] and r["warningCodes"] == ["duplicate_identity"] for r in result["data"]["readers"]))
 
+    @unittest.skipUnless(platform.system() == "Darwin", "Model confirmation enters the macOS-only core workflow.")
     def test_review_cannot_suppress_manual_model_warning(self):
         base = self.sample(); config, session, _ = self.bound_config(base)
         self.reviewed(config); config["readers"]["source"]["model"] = "Kobo Clara 2E"
