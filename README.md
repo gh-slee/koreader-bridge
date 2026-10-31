@@ -262,6 +262,12 @@ Contributions can include focused fixes, clearer documentation, synthetic regres
 
 Report reproducible bugs and feature requests through [GitHub Issues](https://github.com/gh-slee/koreader-bridge/issues). Follow [SECURITY.md](SECURITY.md) for sensitive findings; never attach books, raw backups or unredacted device data.
 
+## Support this project
+
+If you find this project useful, consider [sponsoring on GitHub](https://github.com/sponsors/gh-slee) to support ongoing development, bug fixes, testing, documentation, and maintenance.
+
+Sponsorship is entirely optional. All features remain free and open source.
+
 ## Acknowledgments and license
 
 Built for readers using [KOReader](https://github.com/koreader/koreader) on Kobo devices. Thanks to the KOReader community and this project's [contributors](https://github.com/gh-slee/koreader-bridge/graphs/contributors).
