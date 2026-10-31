@@ -145,6 +145,12 @@ import Foundation
             try await capture("model-correction-warning-dark.png")
             NSApp.appearance = NSAppearance(named: .aqua)
             model.confirmModel(presentation, model: "Kobo Libra 2")
+            // Wait for AppKit to dismiss the previous sheet before presenting another.
+            for _ in 0..<20 {
+                if captureWindow("main")?.attachedSheet == nil { break }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            try require(captureWindow("main")?.attachedSheet == nil, "Previous model sheet did not close.")
             var reviewed = try model.boundWorkflow(model.config.workflow(dryRun: false))
             try require(!ReviewView(model: model, workflow: reviewed).ready, "Compatibility acknowledgement was preselected.")
             model.pendingWorkflow = reviewed
