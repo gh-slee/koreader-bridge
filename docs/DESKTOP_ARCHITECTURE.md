@@ -10,3 +10,15 @@ Synthetic sessions are helper-created private directories marked as samples, wit
 Developer launch flag --test-root selects isolated preferences. --integration-test exercises actual Swift Process transport, synthetic flows and persistence, then captures the app's own view in light/dark appearance. No screenshot of other windows or private reader data is taken.
 
 Developer screenshots first use a public CoreGraphics own-window capture shim that verifies the window belongs to the current process. It cannot capture other processes. A targeted system-capture fallback and an explicitly flagged NSView fallback exist; incomplete NSView captures must not be presented as complete native screenshots. The CoreGraphics capture API is deprecated on newer SDKs and is used only for development verification, not migration.
+
+## Per-operation migration review
+
+Protocol v1 accepts optional typed `config.review` only for explicitly bound migration/saved-source workflows: `rolesConfirmed`, `compatible`, `identity` (`preserve`, `new`, `clone`) and `cloneConfirmed`. Boolean values must be actual booleans; unknown fields and invalid choices are refused. The native review binds these choices to this request's physical reader tokens. No consent is persisted in preferences or reused in later requests. FULL/KOREADER writes require compatibility acknowledgement; cloning requires explicit acknowledgement. Preserve falls back to a new identity only when TARGET has none.
+
+The desktop adapter reuses only known start/role/compatibility/identity choices. Role reuse revalidates the bound connection and selected model. It never answers the final migration question, model exceptions, restore, deletion or unrecognized prompts automatically. Verified source/TARGET backups and fresh write-boundary identity checks still run. Read-only connected previews skip the redundant review and compatibility questions. Callers without `review`, including the CLI and sequential desktop mode, retain existing behavior and schemas.
+
+## Native localization
+
+Reviewed `macos/locales/{en,zh-Hant,zh-Hans}.json` catalogs produce standard `.lproj/Localizable.strings` resources during the explicit-input build. The app resolves the chosen bundle directly, so switching Settings → Language updates all four pages and owned sheets without restarting. A locale environment also reaches native SwiftUI controls. Preferences preserve the selection and unknown fields. Core operations receive a fixed locale per request; ongoing output and saved diagnostics are not retroactively translated.
+
+Native labels use explicit catalog keys and named placeholders. Device warning codes and owned helper progress/prompt IDs travel separately from compatible English diagnostics. Cleanup protection uses the core's original structured reason ID. The UI does not infer localization IDs from rendered core text. Machine schemas, model names, user data/paths, old raw reasons and external diagnostics retain their original form. English fallback handles an unsupported locale or missing resource; catalog parity/placeholder checks reject incomplete build inputs.

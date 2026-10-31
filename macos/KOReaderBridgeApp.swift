@@ -3,6 +3,25 @@ import AppKit
 import Foundation
 import CoreFoundation
 
+// Explicit bundle lookup lets the in-app language change without restarting macOS.
+enum NativeLanguage {
+    static let supported = ["en", "zh-Hant", "zh-Hans"]
+    private static let lock = NSLock()
+    private static var selected = "en"
+    static var locale: String {
+        get { lock.lock(); defer { lock.unlock() }; return selected }
+        set { lock.lock(); defer { lock.unlock() }; selected = supported.contains(newValue) ? newValue : "en" }
+    }
+    static func text(_ key: String, values: [String: String] = [:]) -> String {
+        let language = locale
+        let bundle = Bundle.main.path(forResource: language, ofType: "lproj").flatMap(Bundle.init(path:)) ?? Bundle.main
+        var result = bundle.localizedString(forKey: key, value: key, table: "Localizable")
+        for (name, value) in values { result = result.replacingOccurrences(of: "{" + name + "}", with: value) }
+        return result
+    }
+}
+func native(_ key: String, _ values: [String: String] = [:]) -> String { NativeLanguage.text(key, values: values) }
+
 enum JSONValue: Codable, Sendable {
     case object([String: JSONValue]), array([JSONValue]), string(String), number(Double), bool(Bool), null
     init(from decoder: Decoder) throws {
@@ -56,6 +75,10 @@ struct Workflow: Codable, Sendable {
     var locale: String; var books: Bool; var fonts: Bool; var readingData: Bool; var conflict: String
     var runID: String?; var includeDirs: [String]; var excludeDirs: [String]; var extensions: [String]
     var readers: [String: ReaderSelection]? = nil
+    var review: MigrationReview? = nil
+}
+struct MigrationReview: Codable, Sendable {
+    let rolesConfirmed: Bool; let compatible: Bool; let identity: String; let cloneConfirmed: Bool
 }
 struct ReaderSelection: Codable, Sendable { let id: String; let model: String }
 struct Request: Encodable, Sendable {
@@ -72,6 +95,9 @@ struct Request: Encodable, Sendable {
 struct RunEntry: Decodable, Identifiable, Hashable, Sendable {
     let id: String; let status: String; let operation: String; let bytes: Int64; let endedAt: String
     let targetModified: Bool; let eligible: Bool; let protection: String; let canReuse: Bool; let canRestore: Bool
+    var protectionKey: String? = nil
+    var protectionText: String { protectionKey.map { native($0) } ?? protection }
+    var operationText: String { native(["migration": "Migration", "saved-source": "Saved source", "restore-target": "Restore target", "sample": "Sample", "unknown": "Unknown"][operation] ?? operation) }
 }
 struct RunCatalog: Decodable { let runs: [RunEntry]; let reclaimableBytes: Int64 }
 struct ConnectedReaders: Decodable {
@@ -83,7 +109,7 @@ struct ConnectedReaders: Decodable {
     var models: [String]? = nil
     var message: String {
         switch status {
-        case "connected": return count == 1 ? "One Kobo connected. Choose its role below." : "\(count) Kobos connected. Choose source and target below."
+        case "connected": return count == 1 ? "One Kobo connected. Choose its role below." : native("{count} Kobos connected. Choose source and target below.", ["count": String(count)])
         case "multiple": return "Multiple Kobos connected. Connect one reader at a time."
         case "unknown": return "Kobo connected. Model hint unavailable; enter the model below."
         case "unavailable": return "Kobo connected. Its model hint cannot be read safely."
@@ -94,8 +120,10 @@ struct ConnectedReaders: Decodable {
 struct ConnectedReader: Decodable, Identifiable {
     let id: String; let volume: String; let model: String?; let nativeModel: String?
     let modelCode: String?; let usbModel: String?; let usbVerified: Bool
+    var warningCodes: [String]? = nil
+    var warningText: String { warningCodes.map { $0.map { native("warning." + $0) }.joined(separator: " ") } ?? warning }
     let warning: String; let selectable: Bool; let freeBytes: Int64; let totalBytes: Int64
-    var label: String { (model ?? "Unknown Kobo model") + " — " + volume }
+    var label: String { (model ?? native("Unknown Kobo model")) + " — " + volume }
 }
 struct ReaderCorrection: Identifiable {
     let role: String; let readerID: String
@@ -106,12 +134,20 @@ struct DemoSession: Decodable { let fixtureRoot: String; let workspace: String }
 struct Choice: Decodable, Identifiable, Sendable { let value: String; let label: String; var id: String { value } }
 struct Failure: Decodable, Error, LocalizedError, Sendable {
     let code: String; let message: String
-    var errorDescription: String? { message }
+    var errorDescription: String? {
+        let translated = native(message)
+        if translated != message || NativeLanguage.locale == "en" { return translated }
+        if ["invalid_request", "backend_error", "cancelled"].contains(code) {
+            return native("The request could not complete. Diagnostic detail:") + "\n" + message
+        }
+        return message
+    }
 }
 struct Packet: Decodable, Sendable {
     let version: Int; let id: String; let event: String
     var ok: Bool?; var data: JSONValue?; var error: Failure?
     var role: String?; var model: String?
+    var messageKey: String?; var values: [String: String]?; var warningCodes: [String]?
     var text: String?; var key: String?; var promptID: String?; var kind: String?
     var choices: [Choice]?; var context: [String]?; var requiredText: String?
 }
@@ -286,7 +322,7 @@ struct PreferenceStore {
 
 @MainActor final class AppModel: ObservableObject {
     @Published var section: AppSection = .migration
-    @Published var config = Configuration()
+    @Published var config = Configuration() { didSet { NativeLanguage.locale = config.locale } }
     @Published var runs: [RunEntry] = []
     @Published var selectedRun: String?
     @Published var summary: [String: JSONValue] = [:]
@@ -297,6 +333,7 @@ struct PreferenceStore {
     @Published var problem: String?
     @Published var prompt: CorePrompt?
     @Published var pendingWorkflow: Workflow?
+    @Published var activeWorkflow: Workflow?
     @Published var health: Health?
     @Published var sample: DemoSession?
     @Published var reclaimable: Int64 = 0
@@ -317,11 +354,17 @@ struct PreferenceStore {
     let testRoot: URL?
     var autoReply = false
     var declineFinal = false
+    var holdFinal = false
+    var testPrompts: [String] = []
     var workspace: String { sample?.workspace ?? config.outputRoot }
     var modelOptions: [String] {
         Array(Set((connected?.models ?? []) + discoveredModels + [config.sourceModel, config.targetModel]).filter { !$0.isEmpty }).sorted()
     }
     var readers: [ConnectedReader] { connected?.readers ?? [] }
+    func reviewLabel(_ selection: ReaderSelection) -> String {
+        let volume = readers.first { $0.id == selection.id }?.volume
+        return selection.model + (volume.map { " — " + $0 } ?? "")
+    }
     func readerID(_ role: String) -> String { role == "source" ? sourceReaderID : targetReaderID }
     func chosenModel(_ role: String) -> String { role == "source" ? config.sourceModel : config.targetModel }
     func reader(_ role: String) -> ConnectedReader? { readers.first { $0.id == readerID(role) } }
@@ -355,14 +398,14 @@ struct PreferenceStore {
         var roles: [String: ReaderSelection] = [:]
         for role in workflow.action == "migration" ? ["source", "target"] : ["target"] {
             guard let row = reader(role), row.selectable else {
-                throw Failure(code: "reader_choice", message: "Choose a connected \(role) reader. Reconnect and select again if it is offline.")
+                throw Failure(code: "reader_choice", message: native("Choose a connected {role} reader. Reconnect and select again if it is offline.", ["role": native(role)]))
             }
             let value = chosenModel(role)
-            guard !value.isEmpty else { throw Failure(code: "reader_model", message: "Choose and confirm the \(role) model.") }
+            guard !value.isEmpty else { throw Failure(code: "reader_model", message: native("Choose and confirm the {role} model.", ["role": native(role)])) }
             if !row.warning.isEmpty || row.model?.caseInsensitiveCompare(value) != .orderedSame {
                 guard readerApprovals[role] == row.id + "|" + value else {
                     readerCorrection = ReaderCorrection(role: role, readerID: row.id)
-                    throw Failure(code: "reader_confirmation", message: "Confirm the physical \(role) model before continuing.")
+                    throw Failure(code: "reader_confirmation", message: native("Confirm the physical {role} model before continuing.", ["role": native(role)]))
                 }
             }
             roles[role] = ReaderSelection(id: row.id, model: value)
@@ -381,6 +424,7 @@ struct PreferenceStore {
         store = PreferenceStore(folder: testRoot ?? appSupport.appendingPathComponent("KOReader Bridge", isDirectory: true))
         do { config = try store.load() }
         catch { config.outputRoot = store.folder.appendingPathComponent("Migration Data").path; problem = error.localizedDescription; preferencesWritable = false }
+        NativeLanguage.locale = config.locale
     }
     func save() {
         guard !busy && preferencesWritable else { return }
@@ -391,7 +435,7 @@ struct PreferenceStore {
         guard !busy else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
-        panel.message = "Choose a private Mac folder for migration batches. Existing CLI batches can be reopened here."
+        panel.message = native("Choose a private Mac folder for migration batches. Existing CLI batches can be reopened here.")
         if panel.runModal() == .OK, let url = panel.url { config.outputRoot = url.path; save(); Task { await refresh() } }
     }
     func baseRequest(_ operation: String) -> Request {
@@ -451,11 +495,18 @@ struct PreferenceStore {
     func leaveSample() { guard !busy else { return }; sample = nil; connected = nil; discoveredModels = []; sourceReaderID = ""; targetReaderID = ""; readerApprovals = [:]; logs = []; notice = ""; Task { await refresh(); await refreshConnected() } }
     func review(_ workflow: Workflow) {
         guard !busy else { return }
-        do { pendingWorkflow = try boundWorkflow(workflow); problem = nil }
+        do {
+            var value = try boundWorkflow(workflow); problem = nil
+            if value.readers != nil && value.dryRun && ["migration", "reuse"].contains(value.action) {
+                value.review = MigrationReview(rolesConfirmed: true, compatible: false, identity: "preserve", cloneConfirmed: false)
+                Task { await execute(value) }
+            } else { pendingWorkflow = value }
+        }
         catch { problem = error.localizedDescription }
     }
     func receive(_ event: Packet) {
-        if event.event == "log", let text = event.text {
+        if event.event == "log", let raw = event.text {
+            let text = event.messageKey.map { native($0, event.values ?? [:]) } ?? raw
             let visible = sample.map { text.replacingOccurrences(of: $0.fixtureRoot, with: "Sample Readers") } ?? text
             logs.append(visible); if logs.count > 400 { logs.removeFirst(logs.count - 400) }
             phase = visible
@@ -463,7 +514,8 @@ struct PreferenceStore {
             if event.role == "source" { config.sourceModel = name }
             else if event.role == "target" { config.targetModel = name }
         } else if event.event == "prompt" {
-            if autoReply && sample != nil {
+            if testRoot != nil && sample != nil { testPrompts.append(event.key ?? "") }
+            if autoReply && sample != nil && !(holdFinal && event.key == "confirm.migration") {
                 let answer: String
                 if event.kind == "boolean" { answer = declineFinal && event.key == "confirm.migration" ? "n" : "y" }
                 else if event.kind == "choice" { answer = event.choices?.first?.value ?? "1" }
@@ -484,8 +536,8 @@ struct PreferenceStore {
     func cancel() { guard busy else { return }; phase = "Stopping safely. Keep the current reader connected until recovery finishes."; prompt = nil; backend.cancel() }
     @discardableResult func execute(_ workflow: Workflow) async -> Bool {
         guard !busy else { return false }
-        busy = true; pendingWorkflow = nil; logs = []; problem = nil; notice = ""; phase = "Starting…"
-        defer { busy = false; prompt = nil }
+        busy = true; pendingWorkflow = nil; activeWorkflow = workflow; logs = []; testPrompts = []; problem = nil; notice = ""; phase = "Starting…"
+        defer { busy = false; prompt = nil; activeWorkflow = nil }
         do {
             var request = baseRequest("execute"); request.config = workflow
             let result = try await backend.call(request) { [weak self] packet in Task { @MainActor in self?.receive(packet) } }
@@ -520,9 +572,9 @@ struct PreferenceStore {
     func confirmClose() -> Bool {
         guard busy else { return true }
         let alert = NSAlert()
-        alert.messageText = "An operation is still active"
-        alert.informativeText = "Request a safe stop and wait for recovery before quitting or disconnecting a reader."
-        alert.addButton(withTitle: "Keep Working"); alert.addButton(withTitle: "Request Safe Stop")
+        alert.messageText = native("An operation is still active")
+        alert.informativeText = native("Request a safe stop and wait for recovery before quitting or disconnecting a reader.")
+        alert.addButton(withTitle: native("Keep Working")); alert.addButton(withTitle: native("Request Safe Stop"))
         if alert.runModal() == .alertSecondButtonReturn { cancel() }
         return false
     }
@@ -532,66 +584,114 @@ struct PromptView: View {
     @ObservedObject var model: AppModel
     let prompt: CorePrompt
     @State private var input = ""
+    var displayedText: String {
+        guard let key = prompt.packet.messageKey else { return prompt.packet.text ?? native("Continue?") }
+        var values = prompt.packet.values ?? [:]
+        if let role = values["role"] { values["role"] = native(role) }
+        return native(key, values) + " " + (prompt.packet.warningCodes ?? []).map { native("warning." + $0) }.joined(separator: " ")
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label("Your confirmation is needed", systemImage: "person.crop.circle.badge.questionmark").font(.title2)
-            Text(prompt.packet.text ?? "Continue?").textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            Label(native(prompt.packet.key == "confirm.migration" ? "Ready to migrate" : "Your confirmation is needed"), systemImage: "person.crop.circle.badge.questionmark").font(.title2)
+            if prompt.packet.key == "confirm.migration", let workflow = model.activeWorkflow, workflow.review != nil {
+                LabeledContent(native("Mode"), value: workflow.mode.uppercased())
+                if let source = workflow.readers?["source"] { LabeledContent(native("Source"), value: model.reviewLabel(source)) }
+                else if let id = workflow.runID { LabeledContent(native("Saved source"), value: id) }
+                if let target = workflow.readers?["target"] { LabeledContent(native("Target"), value: model.reviewLabel(target)) }
+                if ["full", "koreader"].contains(workflow.mode), let review = workflow.review {
+                    LabeledContent(native("Target identity"), value: native(review.identity == "clone" ? "Clone source identity" : review.identity == "new" ? "Generate a new identity" : "Keep target identity; create one if missing"))
+                }
+                Text(native("Required recovery backups are ready. The target has not been changed. Continue to apply the reviewed migration; identity will be checked again before writing."))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(displayedText).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             if let context = prompt.packet.context, !context.isEmpty {
-                ScrollView { Text(context.joined(separator: "\n")).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                    .frame(maxHeight: 180).padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                DisclosureGroup(native("Show preparation details")) {
+                    ScrollView { Text(context.joined(separator: "\n")).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                        .frame(maxHeight: 180).padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                }
             }
             if prompt.packet.kind == "choice" {
                 ForEach(prompt.packet.choices ?? []) { choice in Button(choice.label) { model.answer(choice.value) }.frame(maxWidth: .infinity, alignment: .leading) }
             } else if prompt.packet.kind == "text" {
                 if let required = prompt.packet.requiredText, !required.isEmpty {
-                    Text("Type exactly: \(required)").font(.callout).textSelection(.enabled)
+                    Text(native("Type exactly: {text}", ["text": required])).font(.callout).textSelection(.enabled)
                 }
-                TextField("Response", text: $input).textFieldStyle(.roundedBorder)
+                TextField(native("Response"), text: $input).textFieldStyle(.roundedBorder)
             }
             HStack {
-                Button("Stop operation", role: .cancel) { model.cancel() }.keyboardShortcut(.cancelAction)
+                if prompt.packet.key != "confirm.migration" {
+                    Button(native("Stop operation"), role: .cancel) { model.cancel() }.keyboardShortcut(.cancelAction)
+                }
                 Spacer()
                 if prompt.packet.kind == "boolean" {
-                    Button("No") { model.answer("n") }.keyboardShortcut(.defaultAction)
-                    Button("Yes, continue") { model.answer("y") }
+                    Button(native(prompt.packet.key == "confirm.migration" ? "Cancel migration" : "No")) { model.answer("n") }.keyboardShortcut(.defaultAction)
+                    Button(native(prompt.packet.key == "confirm.migration" ? "Migrate now" : "Yes, continue")) { model.answer("y") }
                 } else if prompt.packet.kind != "choice" {
-                    Button("Continue") { model.answer(input) }
+                    Button(native("Continue")) { model.answer(input) }
                         .disabled(prompt.packet.kind == "text" && !(prompt.packet.requiredText ?? "").isEmpty && input != prompt.packet.requiredText)
                         .keyboardShortcut(.defaultAction)
                 }
             }
         }.padding(24).frame(width: 560).interactiveDismissDisabled()
+            .onExitCommand { if prompt.packet.kind == "boolean" { model.answer("n") } else { model.cancel() } }
     }
 }
 struct ReviewView: View {
     @ObservedObject var model: AppModel
     let workflow: Workflow
+    @State private var compatible = false
+    @State private var identity = "preserve"
+    @State private var cloneConfirmed = false
+    var simplified: Bool { workflow.readers != nil && ["migration", "reuse"].contains(workflow.action) && !workflow.dryRun }
+    var requiresCompatibility: Bool { ["full", "koreader"].contains(workflow.mode) }
+    var ready: Bool { !simplified || ((!requiresCompatibility || compatible) && (identity != "clone" || cloneConfirmed)) }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label(workflow.dryRun ? "Review preview" : workflow.action == "delete" ? "Review batch deletion" : "Review operation", systemImage: workflow.dryRun ? "magnifyingglass" : "exclamationmark.shield").font(.title2)
-            Text(workflow.action == "delete" ? "Only the selected eligible batch can be deleted. The core will recheck protection and require exact typed confirmation." :
+            Label(native(workflow.dryRun ? "Review preview" : workflow.action == "delete" ? "Review batch deletion" : "Review operation"), systemImage: workflow.dryRun ? "magnifyingglass" : "exclamationmark.shield").font(.title2)
+            Text(native(workflow.action == "delete" ? "Only the selected eligible batch can be deleted. The core will recheck protection and require exact typed confirmation." :
                  workflow.action == "restore" ? "Restore returns the recorded TARGET state and can remove listed added files. Verified undo backups are retained." :
                  workflow.mode == "audit" ? "Inspect and report without changing reader files or creating backup ZIPs." :
                  workflow.mode == "koreader" ? "Replace only the entire target KOReader directory after verified backups. External books and fonts are excluded." :
                  workflow.mode == "full" ? "Replace the entire target KOReader directory and copy supported books, reading data and root fonts. Matching paths can be overwritten; unrelated external target books are retained." :
-                 "Copy only the selected library content under the chosen conflict policy. Target KOReader stays installed.")
+                 "Copy only the selected library content under the chosen conflict policy. Target KOReader stays installed."))
                 .fixedSize(horizontal: false, vertical: true)
-            LabeledContent("Mode", value: workflow.mode.uppercased())
-            LabeledContent("Action", value: workflow.dryRun ? "Read-only device preview" : workflow.action.capitalized)
+            LabeledContent(native("Mode"), value: workflow.mode.uppercased())
+            LabeledContent(native("Action"), value: native(workflow.dryRun ? "Read-only device preview" : workflow.action.capitalized))
             if let roles = workflow.readers {
-                if let source = roles["source"] { LabeledContent("Source", value: source.model) }
-                if let target = roles["target"] { LabeledContent("Target", value: target.model) }
+                if let source = roles["source"] { LabeledContent(native("Source"), value: model.reviewLabel(source)) }
+                if let target = roles["target"] { LabeledContent(native("Target"), value: model.reviewLabel(target)) }
             }
-            if let id = workflow.runID { LabeledContent("Batch", value: id) }
-            if model.sample != nil { Label("Synthetic sample readers only", systemImage: "testtube.2").foregroundStyle(.teal) }
-            Text(workflow.readers != nil ? "These choices are bound to the current USB connections. Keep the target connected; the app rechecks identity before writes. Core role, compatibility, backup and final confirmations still apply." : "Keep readers disconnected until requested. Connect one at a time and confirm the physical roles and source-build compatibility. A full dry-run may create private local reports, but does not change readers or create backup ZIPs.")
+            if let id = workflow.runID { LabeledContent(native("Batch"), value: id) }
+            if model.sample != nil { Label(native("Synthetic sample readers only"), systemImage: "testtube.2").foregroundStyle(.teal) }
+            if simplified {
+                Text(native("Confirm these source and target roles. The app will prepare backups automatically, then ask once before writing. Unusual model or identity problems still require attention."))
+                    .font(.callout).fixedSize(horizontal: false, vertical: true)
+                if requiresCompatibility {
+                    Toggle(native("I confirm the source KOReader build can run on the target reader."), isOn: $compatible)
+                    DisclosureGroup(native("KOReader identity options")) {
+                        Picker(native("Target identity"), selection: $identity) {
+                            Text(native("Keep target identity; create one if missing")).tag("preserve")
+                            Text(native("Generate a new identity")).tag("new")
+                            Text(native("Clone source identity")).tag("clone")
+                        }
+                        if identity == "clone" { Toggle(native("I understand both readers will share the source KOReader identity."), isOn: $cloneConfirmed) }
+                    }
+                }
+            }
+            Text(native(workflow.readers != nil ? "These choices apply only to this operation and the selected USB connections. Keep the target connected until safe eject. Device, space, archive and recovery checks remain active." : "Keep readers disconnected until requested. Connect one at a time and confirm the physical roles and source-build compatibility. A full dry-run may create private local reports, but does not change readers or create backup ZIPs."))
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
-                Button("Not now", role: .cancel) { model.pendingWorkflow = nil }.keyboardShortcut(.defaultAction)
+                Button(native("Not now"), role: .cancel) { model.pendingWorkflow = nil }.keyboardShortcut(.defaultAction)
                 Spacer()
-                Button(workflow.dryRun ? "Start preview" : "Continue to core confirmations") { Task { await model.execute(workflow) } }
+                Button(native(workflow.dryRun ? "Start preview" : simplified ? "Back up and prepare" : "Continue to core confirmations")) {
+                    var value = workflow
+                    if simplified { value.review = MigrationReview(rolesConfirmed: true, compatible: compatible, identity: identity, cloneConfirmed: cloneConfirmed) }
+                    Task { await model.execute(value) }
+                }.disabled(!ready)
             }
         }.padding(24).frame(width: 560)
+            .onExitCommand { model.pendingWorkflow = nil }
     }
 }
 struct ReaderCorrectionView: View {
@@ -606,27 +706,27 @@ struct ReaderCorrectionView: View {
     var valid: Bool { value.count <= 80 && value.range(of: "^Kobo [A-Za-z0-9][A-Za-z0-9 ._()+-]*$", options: .regularExpression) != nil }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Confirm the physical reader model", systemImage: "exclamationmark.triangle").font(.title2)
-            Text("Check the \(correction.role.uppercased()) reader itself before confirming. A wrong model label can hide a compatibility problem.")
+            Label(native("Confirm the physical reader model"), systemImage: "exclamationmark.triangle").font(.title2)
+            Text(native("Check the {role} reader itself before confirming. A wrong model label can hide a compatibility problem.", ["role": native(correction.role)]))
                 .fixedSize(horizontal: false, vertical: true)
             if let row = model.reader(correction.role) {
-                LabeledContent("Volume", value: row.volume)
-                LabeledContent("Native identification", value: row.nativeModel ?? "Unknown")
-                LabeledContent("USB model", value: row.usbModel ?? "Not uniquely identified")
-                if !row.warning.isEmpty { Text(row.warning).font(.callout).fixedSize(horizontal: false, vertical: true) }
+                LabeledContent(native("Volume"), value: row.volume)
+                LabeledContent(native("Native identification"), value: row.nativeModel ?? native("Unknown"))
+                LabeledContent(native("USB model"), value: row.usbModel ?? native("Not uniquely identified"))
+                if !row.warning.isEmpty { Text(row.warningText).font(.callout).fixedSize(horizontal: false, vertical: true) }
             }
-            Picker("Correct model", selection: $choice) {
-                Text("Choose a model").tag("")
+            Picker(native("Correct model"), selection: $choice) {
+                Text(native("Choose a model")).tag("")
                 ForEach(model.modelOptions, id: \.self) { Text($0).tag($0) }
-                Text("Other Kobo model…").tag("__custom")
+                Text(native("Other Kobo model…")).tag("__custom")
             }
-            if choice == "__custom" { TextField("Model name", text: $custom, prompt: Text("Kobo model name")).textFieldStyle(.roundedBorder) }
-            Text("This correction applies only to this reader selection. It does not change Kobo files or bypass USB identity, backups or write-time checks.")
+            if choice == "__custom" { TextField(native("Model name"), text: $custom, prompt: Text(native("Kobo model name"))).textFieldStyle(.roundedBorder) }
+            Text(native("This correction applies only to this reader selection. It does not change Kobo files or bypass USB identity, backups or write-time checks."))
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button("Cancel", role: .cancel) { model.readerCorrection = nil }.keyboardShortcut(.cancelAction)
+                Button(native("Cancel"), role: .cancel) { model.readerCorrection = nil }.keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Confirm physical model") { model.confirmModel(correction, model: value) }.disabled(!valid)
+                Button(native("Confirm physical model")) { model.confirmModel(correction, model: value) }.disabled(!valid)
             }
         }.padding(24).frame(width: 560).interactiveDismissDisabled()
             .onAppear { choice = model.chosenModel(correction.role) }
@@ -639,25 +739,25 @@ struct ReaderRoleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Picker(title, selection: Binding(get: { model.readerID(role) }, set: { model.selectReader($0, role: role) })) {
-                    Text("Choose \(role) reader").tag("")
+                Picker(native(title), selection: Binding(get: { model.readerID(role) }, set: { model.selectReader($0, role: role) })) {
+                    Text(native("Choose {role} reader", ["role": native(role)])).tag("")
                     if !model.readerID(role).isEmpty && model.reader(role) == nil {
-                        Text("Disconnected — select again").tag(model.readerID(role)).disabled(true)
+                        Text(native("Disconnected — select again")).tag(model.readerID(role)).disabled(true)
                     }
                     ForEach(model.readers) { row in
                         Text(row.label).tag(row.id)
                             .disabled(!row.selectable || row.id == model.readerID(role == "source" ? "target" : "source"))
                     }
                 }
-                Button("Correct model…") { model.correctModel(role) }.disabled(model.reader(role)?.selectable != true)
+                Button(native("Correct model…")) { model.correctModel(role) }.disabled(model.reader(role)?.selectable != true)
             }
             if let row = model.reader(role) {
-                Text("Selected model: \(model.chosenModel(role).isEmpty ? "Confirmation needed" : model.chosenModel(role))")
+                Text(native("Selected model: {model}", ["model": model.chosenModel(role).isEmpty ? native("Confirmation needed") : model.chosenModel(role)]))
                     .font(.callout).textSelection(.enabled)
-                Label((row.usbVerified ? "USB identity verified" : "USB identity not verified") + " · " + formattedBytes(row.freeBytes) + " available",
+                Label(native("{identity} · {bytes} available", ["identity": native(row.usbVerified ? "USB identity verified" : "USB identity not verified"), "bytes": formattedBytes(row.freeBytes)]),
                       systemImage: row.usbVerified ? "checkmark.shield" : "exclamationmark.triangle")
                     .font(.callout).foregroundStyle(.secondary)
-                if !row.warning.isEmpty { Text(row.warning).font(.callout).fixedSize(horizontal: false, vertical: true) }
+                if !row.warning.isEmpty { Text(row.warningText).font(.callout).fixedSize(horizontal: false, vertical: true) }
             }
         }
     }
@@ -683,71 +783,71 @@ struct MigrationView: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                Section("Migration scope") {
-                    Picker("Mode", selection: $model.config.mode) {
-                        Text("KOReader directory only").tag("koreader")
-                        Text("Full setup and library").tag("full")
-                        Text("Library content only").tag("library")
-                        Text("Audit only").tag("audit")
+                Section(native("Migration scope")) {
+                    Picker(native("Mode"), selection: $model.config.mode) {
+                        Text(native("KOReader directory only")).tag("koreader")
+                        Text(native("Full setup and library")).tag("full")
+                        Text(native("Library content only")).tag("library")
+                        Text(native("Audit only")).tag("audit")
                     }
-                    Text(model.config.mode == "koreader" ? "Settings, plugins and reading data inside KOReader. External books and fonts are untouched." :
+                    Text(native(model.config.mode == "koreader" ? "Settings, plugins and reading data inside KOReader. External books and fonts are untouched." :
                          model.config.mode == "full" ? "Complete KOReader plus supported ebooks, reading data and root fonts. Target-only external books are retained." :
-                         model.config.mode == "library" ? "Keep the installed target runtime and choose which library content to copy." : "Inspect and report without changing reader files.")
+                         model.config.mode == "library" ? "Keep the installed target runtime and choose which library content to copy." : "Inspect and report without changing reader files."))
                         .font(.callout).foregroundStyle(.secondary)
                 }
-                Section("Reader roles") {
+                Section(native("Reader roles")) {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Label(model.readerProblem ?? model.connected?.message ?? "Checking connected readers…", systemImage: "externaldrive")
+                            Label(native(model.readerProblem ?? model.connected?.message ?? "Checking connected readers…"), systemImage: "externaldrive")
                                 .font(.callout).lineLimit(3)
                             Spacer()
                             if model.checkingReaders { ProgressView().controlSize(.small) }
-                            Button("Refresh readers") { Task { await model.refreshConnected() } }
+                            Button(native("Refresh readers")) { Task { await model.refreshConnected() } }
                                 .disabled(model.checkingReaders)
                         }
                     }
-                    Toggle("Choose from connected readers", isOn: $model.useConnectedReaders)
+                    Toggle(native("Choose from connected readers"), isOn: $model.useConnectedReaders)
                     if model.useConnectedReaders {
                         ForEach(model.readers.filter { !$0.selectable }) { row in
-                            Label(row.volume + ": " + row.warning, systemImage: "exclamationmark.triangle")
+                            Label(row.volume + ": " + row.warningText, systemImage: "exclamationmark.triangle")
                                 .font(.callout).fixedSize(horizontal: false, vertical: true)
                         }
                         ReaderRoleView(model: model, role: "source")
                         ReaderRoleView(model: model, role: "target")
-                        Text("Both readers may stay connected. Choose each role explicitly. Use Correct model if automatic identification is wrong; confirm the physical model in the warning window.")
+                        Text(native("Both readers may stay connected. Choose each role explicitly. Use Correct model if automatic identification is wrong; confirm the physical model in the warning window."))
                             .font(.callout).foregroundStyle(.secondary)
                     } else {
-                        TextField("Source model", text: $model.config.sourceModel, prompt: Text("Optional model name"))
-                        TextField("Target model", text: $model.config.targetModel, prompt: Text("Optional model name"))
-                        Text("Sequential mode: connect only the requested reader, one at a time. Physical-model confirmations remain required.")
+                        TextField(native("Source model"), text: $model.config.sourceModel, prompt: Text(native("Optional model name")))
+                        TextField(native("Target model"), text: $model.config.targetModel, prompt: Text(native("Optional model name")))
+                        Text(native("Sequential mode: connect only the requested reader, one at a time. Physical-model confirmations remain required."))
                             .font(.callout).foregroundStyle(.secondary)
                     }
                 }
                 if model.config.mode == "library" {
-                    Section("Library options") {
-                        Toggle("Books and adjacent reading data", isOn: $model.config.books)
-                        Toggle("Root fonts", isOn: $model.config.fonts)
-                        Toggle("Include reading data", isOn: $model.config.readingData)
-                        Picker("Matching paths", selection: $model.config.conflict) {
-                            Text("Overwrite from source").tag("overwrite"); Text("Keep target file and metadata").tag("keep-target")
+                    Section(native("Library options")) {
+                        Toggle(native("Books and adjacent reading data"), isOn: $model.config.books)
+                        Toggle(native("Root fonts"), isOn: $model.config.fonts)
+                        Toggle(native("Include reading data"), isOn: $model.config.readingData)
+                        Picker(native("Matching paths"), selection: $model.config.conflict) {
+                            Text(native("Overwrite from source")).tag("overwrite"); Text(native("Keep target file and metadata")).tag("keep-target")
                         }
-                        TextField("Include directories (one per line)", text: $model.config.includePaths, axis: .vertical)
-                        TextField("Exclude directories (one per line)", text: $model.config.excludePaths, axis: .vertical)
-                        TextField("Additional extensions (one per line)", text: $model.config.extensions, axis: .vertical)
+                        TextField(native("Include directories (one per line)"), text: $model.config.includePaths, axis: .vertical)
+                        TextField(native("Exclude directories (one per line)"), text: $model.config.excludePaths, axis: .vertical)
+                        TextField(native("Additional extensions (one per line)"), text: $model.config.extensions, axis: .vertical)
                     }
                 }
-                Section("Output") {
-                    LabeledContent("Private backup folder") { Text(model.sample == nil ? model.workspace : "Sample Readers / Workspace").lineLimit(2).textSelection(.enabled).foregroundStyle(.secondary) }
-                    Text("Backups may include plugin credentials and reading history. They stay in this folder; the app has no upload or telemetry action.").font(.callout).foregroundStyle(.secondary)
+                Section(native("Output")) {
+                    LabeledContent(native("Private backup folder")) { Text(native(model.sample == nil ? model.workspace : "Sample Readers / Workspace")).lineLimit(2).textSelection(.enabled).foregroundStyle(.secondary) }
+                    Text(native("Backups may include plugin credentials and reading history. They stay in this folder; the app has no upload or telemetry action.")).font(.callout).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped).disabled(model.busy)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             PageColumn {
                 HStack {
-                Button("Save choices") { model.save() }.disabled(model.busy || !model.preferencesWritable)
+                Button(native("Save choices")) { model.save() }.disabled(model.busy || !model.preferencesWritable)
                 Spacer()
-                Button("Preview changes") { model.review(model.config.workflow(dryRun: true)) }.disabled(model.busy).keyboardShortcut("p", modifiers: [.command, .shift])
-                Button(model.config.mode == "audit" ? "Start audit" : "Start migration") { model.review(model.config.workflow(dryRun: model.config.mode == "audit")) }
+                Button(native("Preview changes")) { model.review(model.config.workflow(dryRun: true)) }.disabled(model.busy).keyboardShortcut("p", modifiers: [.command, .shift])
+                Button(native(model.config.mode == "audit" ? "Start audit" : "Start migration")) { model.review(model.config.workflow(dryRun: model.config.mode == "audit")) }
                     .buttonStyle(.borderedProminent).disabled(model.busy)
                 }.padding(.vertical, 16)
             }
@@ -765,16 +865,16 @@ struct ActivityView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         if model.busy { ProgressView().controlSize(.small) }
-                        Text(model.busy ? "Operation in progress" : "Activity").font(.headline)
+                        Text(native(model.busy ? "Operation in progress" : "Activity")).font(.headline)
                         Spacer()
-                        if model.busy { Button("Request safe stop", role: .destructive) { model.cancel() } }
+                        if model.busy { Button(native("Request safe stop"), role: .destructive) { model.cancel() } }
                     }
                     if model.logs.isEmpty {
-                        Text("Preview the plan before writing. Progress and core confirmations appear here.")
+                        Text(native("Preview the plan before writing. Progress and core confirmations appear here."))
                             .foregroundStyle(.secondary).font(.callout)
                     } else {
-                        Text(model.phase).font(.callout).lineLimit(2).textSelection(.enabled)
-                        DisclosureGroup("Show activity details", isExpanded: $showDetails) {
+                        Text(native(model.phase)).font(.callout).lineLimit(2).textSelection(.enabled)
+                        DisclosureGroup(native("Show activity details"), isExpanded: $showDetails) {
                             ScrollView {
                                 Text(model.logs.suffix(100).joined(separator: "\n")).font(.system(.caption, design: .monospaced))
                                     .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
@@ -793,34 +893,34 @@ struct BackupsView: View {
         VStack(spacing: 0) {
             PageColumn {
                 if model.runs.isEmpty {
-                    ContentUnavailableView(cleanup ? "No batches to review" : "Your backups will appear here", systemImage: "archivebox",
-                        description: Text("Complete a migration or choose an existing CLI backup folder in Settings. Sample readers let you explore safely."))
+                    ContentUnavailableView(native(cleanup ? "No batches to review" : "Your backups will appear here"), systemImage: "archivebox",
+                        description: Text(native("Complete a migration or choose an existing CLI backup folder in Settings. Sample readers let you explore safely.")))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     VStack(alignment: .leading, spacing: 16) {
                         if cleanup {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
-                                    Text("Eligible to reclaim").font(.headline)
+                                    Text(native("Eligible to reclaim")).font(.headline)
                                     Spacer()
                                     Text(formattedBytes(model.reclaimable)).monospacedDigit()
                                 }
-                                Text("Recent successes, dependencies, recovery points and uncertain batches stay protected. Select an eligible batch; deletion still requires core confirmation.")
+                                Text(native("Recent successes, dependencies, recovery points and uncertain batches stay protected. Select an eligible batch; deletion still requires core confirmation."))
                                     .font(.callout).foregroundStyle(.secondary)
                             }
                         }
                         GeometryReader { area in
                             let usable = max(450, area.size.width - 100)
                             Table(model.runs, selection: $model.selectedRun) {
-                                TableColumn("Batch") { row in Text(row.id).lineLimit(1).truncationMode(.middle).help(row.id) }.width(usable * 0.29)
-                                TableColumn("Status") { row in
-                                    Label(row.status, systemImage: row.status == "success" ? "checkmark.circle" : row.status == "needs-recovery" ? "exclamationmark.triangle" : "doc.text")
+                                TableColumn(native("Batch")) { row in Text(row.id).lineLimit(1).truncationMode(.middle).help(row.id) }.width(usable * 0.29)
+                                TableColumn(native("Status")) { row in
+                                    Label(native(row.status), systemImage: row.status == "success" ? "checkmark.circle" : row.status == "needs-recovery" ? "exclamationmark.triangle" : "doc.text")
                                         .foregroundStyle(row.status == "needs-recovery" ? Color.orange : Color.primary)
-                                        .lineLimit(1).help(row.status)
+                                        .lineLimit(1).help(native(row.status))
                                 }.width(usable * 0.17)
-                                TableColumn("Operation") { row in Text(row.operation.replacingOccurrences(of: "-", with: " ").capitalized).lineLimit(1).help(row.operation) }.width(usable * 0.16)
-                                TableColumn("Size") { row in Text(formattedBytes(row.bytes)).monospacedDigit() }.width(usable * 0.11)
-                                TableColumn("Retention") { row in Text(row.eligible ? "Eligible" : row.protection).lineLimit(2).help(row.protection) }.width(usable * 0.27)
+                                TableColumn(native("Operation")) { row in Text(row.operationText).lineLimit(1).help(row.operationText) }.width(usable * 0.16)
+                                TableColumn(native("Size")) { row in Text(formattedBytes(row.bytes)).monospacedDigit() }.width(usable * 0.11)
+                                TableColumn(native("Retention")) { row in Text(native(row.eligible ? native("Eligible") : row.protectionText)).lineLimit(2).help(row.protectionText) }.width(usable * 0.27)
                             }
                             .frame(width: area.size.width, height: area.size.height)
                             .clipped()
@@ -833,24 +933,24 @@ struct BackupsView: View {
                                 HStack {
                                     Text(row.id).font(.headline).lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(row.id)
                                     Spacer()
-                                    Button("Show in Finder") { model.revealSelected() }
+                                    Button(native("Show in Finder")) { model.revealSelected() }
                                 }
                                 if !model.summary.isEmpty {
                                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), alignment: .leading)], alignment: .leading, spacing: 12) {
                                         ForEach(model.summary.keys.sorted(), id: \.self) { key in
                                             VStack(alignment: .leading, spacing: 4) {
-                                                Text(key.replacingOccurrences(of: "_", with: " ").capitalized).foregroundStyle(.secondary)
-                                                Text("\(Int(model.summary[key]?.object["count"]?.number ?? 0)) files").monospacedDigit()
+                                                Text(native(key.replacingOccurrences(of: "_", with: " ").capitalized)).foregroundStyle(.secondary)
+                                                Text(native("{count} files", ["count": String(Int(model.summary[key]?.object["count"]?.number ?? 0))])).monospacedDigit()
                                             }.font(.callout)
                                         }
                                     }
                                 }
                                 if cleanup {
                                     HStack(alignment: .top) {
-                                        Text(row.eligible ? "This batch is eligible. Review it before deleting." : row.protection)
-                                            .font(.callout).foregroundStyle(.secondary).lineLimit(3).help(row.protection)
+                                        Text(native(row.eligible ? native("This batch is eligible. Review it before deleting.") : row.protectionText))
+                                            .font(.callout).foregroundStyle(.secondary).lineLimit(3).help(row.protectionText)
                                         Spacer()
-                                        Button("Delete selected batch…", role: .destructive) { model.review(model.config.workflow(action: "delete", dryRun: false, runID: row.id)) }
+                                        Button(native("Delete selected batch…"), role: .destructive) { model.review(model.config.workflow(action: "delete", dryRun: false, runID: row.id)) }
                                             .disabled(!row.eligible || model.busy)
                                     }
                                 } else {
@@ -859,14 +959,14 @@ struct BackupsView: View {
                                         VStack(alignment: .leading, spacing: 12) { sourceActions(row); restoreActions(row) }
                                     }
                                     if !row.canReuse && !row.canRestore {
-                                        Text("This batch has no reusable source or exact target snapshot. Its recovery files are retained.")
+                                        Text(native("This batch has no reusable source or exact target snapshot. Its recovery files are retained."))
                                             .font(.callout).foregroundStyle(.secondary)
                                     }
                                 }
                             }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                         } else {
-                            Text(cleanup ? "Select a batch to review its protection and deletion options." : "Select a batch to inspect its snapshots and available actions.")
+                            Text(native(cleanup ? "Select a batch to review its protection and deletion options." : "Select a batch to inspect its snapshots and available actions."))
                                 .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
                         }
                     }.padding(.vertical, PageLayout.inset)
@@ -877,14 +977,14 @@ struct BackupsView: View {
     }
     private func sourceActions(_ row: RunEntry) -> some View {
         HStack {
-            Button("Preview saved source") { model.review(model.config.workflow(action: "reuse", dryRun: true, runID: row.id)) }
-            Button("Migrate saved source…") { model.review(model.config.workflow(action: "reuse", dryRun: false, runID: row.id)) }
+            Button(native("Preview saved source")) { model.review(model.config.workflow(action: "reuse", dryRun: true, runID: row.id)) }
+            Button(native("Migrate saved source…")) { model.review(model.config.workflow(action: "reuse", dryRun: false, runID: row.id)) }
         }.disabled(!row.canReuse || model.busy)
     }
     private func restoreActions(_ row: RunEntry) -> some View {
         HStack {
-            Button("Preview target restore") { model.review(model.config.workflow(action: "restore", dryRun: true, runID: row.id)) }
-            Button("Restore target…") { model.review(model.config.workflow(action: "restore", dryRun: false, runID: row.id)) }
+            Button(native("Preview target restore")) { model.review(model.config.workflow(action: "restore", dryRun: true, runID: row.id)) }
+            Button(native("Restore target…")) { model.review(model.config.workflow(action: "restore", dryRun: false, runID: row.id)) }
         }.disabled(!row.canRestore || model.busy)
     }
 }
@@ -892,24 +992,24 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     var body: some View {
         Form {
-            Section("Private storage") {
-                LabeledContent("Backup folder") { Text(model.config.outputRoot).textSelection(.enabled).lineLimit(3) }
-                Button("Choose folder…") { model.chooseFolder() }
-                Text("Choose an existing CLI output folder to reopen its batches. Existing archives and unknown metadata are preserved.").font(.callout).foregroundStyle(.secondary)
+            Section(native("Private storage")) {
+                LabeledContent(native("Backup folder")) { Text(model.config.outputRoot).textSelection(.enabled).lineLimit(3) }
+                Button(native("Choose folder…")) { model.chooseFolder() }
+                Text(native("Choose an existing CLI output folder to reopen its batches. Existing archives and unknown metadata are preserved.")).font(.callout).foregroundStyle(.secondary)
             }
-            Section("Workflow") {
-                Picker("Migration language", selection: $model.config.locale) {
-                    Text("English").tag("en"); Text("繁體中文").tag("zh-Hant"); Text("简体中文").tag("zh-Hans")
+            Section(native("Workflow")) {
+                Picker(native("Language"), selection: $model.config.locale) {
+                    Text(native("English")).tag("en"); Text(native("繁體中文")).tag("zh-Hant"); Text(native("简体中文")).tag("zh-Hans")
                 }
-                Stepper("Protect at least \(model.config.keepSuccessful) recent successful batches", value: $model.config.keepSuccessful, in: 1...100)
-                Text("The native app interface is English. Core prompts, progress and reports use the selected language. Additional dependency and recovery protections always apply.").font(.callout).foregroundStyle(.secondary)
+                Stepper(native("Protect at least {count} recent successful batches", ["count": String(model.config.keepSuccessful)]), value: $model.config.keepSuccessful, in: 1...100)
+                Text(native("The interface and new operations use this language immediately. Existing activity keeps its original language. Recovery protections always apply.")).font(.callout).foregroundStyle(.secondary)
             }
-            Section("Application") {
-                LabeledContent("Core", value: model.health?.coreVersion ?? "Checking…")
-                LabeledContent("Bundled Python", value: model.health?.pythonVersion ?? "Checking…")
-                Text("Offline operation. No shell Python, AI service or account required. Local builds are ad-hoc signed and are not notarized.").font(.callout).foregroundStyle(.secondary)
-                Button("Save preferences") { model.save() }.disabled(!model.preferencesWritable)
-                Button("Open usage guide") { if let url = Bundle.main.resourceURL?.appendingPathComponent("backend/docs/MACOS.md") { NSWorkspace.shared.open(url) } }
+            Section(native("Application")) {
+                LabeledContent(native("Core"), value: model.health?.coreVersion ?? native("Checking…"))
+                LabeledContent(native("Bundled Python"), value: model.health?.pythonVersion ?? native("Checking…"))
+                Text(native("Offline operation. No shell Python, AI service or account required. Local builds are ad-hoc signed and are not notarized.")).font(.callout).foregroundStyle(.secondary)
+                Button(native("Save preferences")) { model.save() }.disabled(!model.preferencesWritable)
+                Button(native("Open usage guide")) { if let url = Bundle.main.resourceURL?.appendingPathComponent("backend/docs/MACOS.md") { NSWorkspace.shared.open(url) } }
             }
         }.formStyle(.grouped).disabled(model.busy)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -919,23 +1019,23 @@ struct MainView: View {
     @ObservedObject var model: AppModel
     var body: some View {
         NavigationSplitView {
-            List(AppSection.allCases, selection: Binding<AppSection?>(get: { model.section }, set: { if let value = $0 { model.section = value } })) { item in Label(item.rawValue, systemImage: item.symbol).tag(item) }
+            List(AppSection.allCases, selection: Binding<AppSection?>(get: { model.section }, set: { if let value = $0 { model.section = value } })) { item in Label(native(item.rawValue), systemImage: item.symbol).tag(item) }
                 .navigationTitle("KOReader Bridge")
                 .safeAreaInset(edge: .bottom) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label(model.sample == nil ? "Private, offline workspace" : "Sample readers", systemImage: model.sample == nil ? "lock.shield" : "testtube.2")
+                        Label(native(model.sample == nil ? "Private, offline workspace" : "Sample readers"), systemImage: model.sample == nil ? "lock.shield" : "testtube.2")
                             .font(.caption).foregroundStyle(.secondary)
-                        if model.sample != nil { Button("Leave sample session") { model.leaveSample() }.disabled(model.busy) }
-                        else { Button("Try sample readers") { Task { await model.createSample() } }.disabled(model.busy) }
+                        if model.sample != nil { Button(native("Leave sample session")) { model.leaveSample() }.disabled(model.busy) }
+                        else { Button(native("Try sample readers")) { Task { await model.createSample() } }.disabled(model.busy) }
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 }.navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 250)
         } detail: {
             VStack(spacing: 0) {
-                if model.sample != nil { HStack { Label("Sample data — no physical readers are used", systemImage: "testtube.2"); Spacer() }.font(.callout).padding(12).background(.teal.opacity(0.12)) }
+                if model.sample != nil { HStack { Label(native("Sample data — no physical readers are used"), systemImage: "testtube.2"); Spacer() }.font(.callout).padding(12).background(.teal.opacity(0.12)) }
                 if let problem = model.problem {
-                    HStack(alignment: .top) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange); Text(problem).textSelection(.enabled); Spacer(); Button("Dismiss") { model.problem = nil } }.padding(12).background(.orange.opacity(0.1))
+                    HStack(alignment: .top) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange); Text(native(problem)).textSelection(.enabled); Spacer(); Button(native("Dismiss")) { model.problem = nil } }.padding(12).background(.orange.opacity(0.1))
                 } else if !model.notice.isEmpty {
-                    HStack { Image(systemName: "checkmark.circle").foregroundStyle(.teal); Text(model.notice); Spacer() }.font(.callout).padding(12)
+                    HStack { Image(systemName: "checkmark.circle").foregroundStyle(.teal); Text(native(model.notice)); Spacer() }.font(.callout).padding(12)
                 }
                 switch model.section {
                 case .migration: MigrationView(model: model)
@@ -944,11 +1044,13 @@ struct MainView: View {
                 case .settings: SettingsView(model: model)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                .navigationTitle(model.section.rawValue)
+                .navigationTitle(native(model.section.rawValue))
                 .toolbar {
-                    ToolbarItem { Button { Task { await model.refresh() } } label: { Label("Refresh batches", systemImage: "arrow.clockwise") }.disabled(model.busy).keyboardShortcut("r", modifiers: .command) }
+                    ToolbarItem { Button { Task { await model.refresh() } } label: { Label(native("Refresh batches"), systemImage: "arrow.clockwise") }.disabled(model.busy).keyboardShortcut("r", modifiers: .command) }
                 }
         }.tint(.teal).frame(minWidth: 940, minHeight: 680)
+            .environment(\.locale, Locale(identifier: model.config.locale))
+            .onChange(of: model.config.locale) { _, _ in model.save() }
             .sheet(item: $model.prompt) { PromptView(model: model, prompt: $0) }
             .sheet(item: $model.pendingWorkflow) { ReviewView(model: model, workflow: $0) }
             .sheet(item: $model.readerCorrection) { ReaderCorrectionView(model: model, correction: $0) }
@@ -994,8 +1096,8 @@ struct WindowLink: NSViewRepresentable {
         }.defaultSize(width: 1120, height: 800)
             .commands {
                 CommandGroup(replacing: .newItem) {}
-                CommandGroup(replacing: .saveItem) { Button("Save choices") { model.save() }.keyboardShortcut("s", modifiers: .command).disabled(model.busy || !model.preferencesWritable) }
-                CommandGroup(after: .appInfo) { Button("KOReader Bridge Settings") { model.section = .settings }.keyboardShortcut(",", modifiers: .command) }
+                CommandGroup(replacing: .saveItem) { Button(native("Save choices")) { model.save() }.keyboardShortcut("s", modifiers: .command).disabled(model.busy || !model.preferencesWritable) }
+                CommandGroup(after: .appInfo) { Button(native("KOReader Bridge Settings")) { model.section = .settings }.keyboardShortcut(",", modifiers: .command) }
             }
     }
 }

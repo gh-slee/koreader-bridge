@@ -5,7 +5,7 @@ import Foundation
 @MainActor enum NativeChecks {
     static func captureWindow(_ name: String) -> NSWindow? {
         guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.sheetParent == nil }) else { return nil }
-        return name.hasPrefix("model-correction") ? window.attachedSheet : window
+        return name.hasPrefix("model-correction") || name.hasPrefix("migration-review") || name.hasPrefix("migration-final") ? window.attachedSheet : window
     }
     static func require(_ condition: Bool, _ message: String) throws {
         if !condition { throw Failure(code: "native_test", message: message) }
@@ -145,6 +145,41 @@ import Foundation
             try await capture("model-correction-warning-dark.png")
             NSApp.appearance = NSAppearance(named: .aqua)
             model.confirmModel(presentation, model: "Kobo Libra 2")
+            var reviewed = try model.boundWorkflow(model.config.workflow(dryRun: false))
+            try require(!ReviewView(model: model, workflow: reviewed).ready, "Compatibility acknowledgement was preselected.")
+            model.pendingWorkflow = reviewed
+            for language in NativeLanguage.supported {
+                model.config.locale = language
+                try require(native("Settings") == (language == "en" ? "Settings" : language == "zh-Hant" ? "設定" : "设置"), "Native bundle lookup failed.")
+                try require(!native("{count} files", ["count": "7"]).contains("{count}"), "Native placeholder substitution failed.")
+                try await capture("migration-review-" + language + ".png")
+            }
+            model.pendingWorkflow = nil
+            cases.append("localized-review-and-default-unchecked-compatibility")
+            model.config.locale = "zh-Hant"
+            try model.store.save(model.config)
+            let reopenedModel = AppModel()
+            try require(reopenedModel.config.locale == "zh-Hant" && NativeLanguage.locale == "zh-Hant", "Language did not survive reopening preferences.")
+            cases.append("language-save-and-reopen")
+            reviewed.locale = "zh-Hant"
+            reviewed.review = MigrationReview(rolesConfirmed: true, compatible: true, identity: "preserve", cloneConfirmed: false)
+            model.autoReply = true; model.holdFinal = true
+            let prepared = Task { await model.execute(reviewed) }
+            for _ in 0..<300 {
+                if model.prompt?.packet.key == "confirm.migration" { break }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            try require(model.prompt?.packet.key == "confirm.migration", "Reviewed migration did not stop before writing.")
+            try require(model.testPrompts == ["confirm.migration"], "Reviewed migration retained redundant prompts.")
+            for language in NativeLanguage.supported {
+                model.config.locale = language
+                try await capture("migration-final-" + language + ".png")
+            }
+            model.answer("n")
+            let declined = await prepared.value
+            try require(declined && model.notice.hasPrefix("Cancelled."), "Reviewed final decline was not retained.")
+            model.holdFinal = false; model.config.locale = "en"
+            cases.append("reviewed-migration-single-final-confirmation-and-decline")
             model.autoReply = true
             let boundPreview = try model.boundWorkflow(model.config.workflow(dryRun: true))
             let boundResult = await model.execute(boundPreview)
@@ -230,6 +265,24 @@ import Foundation
                 }
             }
             cases.append("four-page-layout-matrix")
+            resize(940, 680)
+            for language in ["zh-Hant", "zh-Hans"] {
+                model.config.locale = language
+                for dark in [false, true] {
+                    NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                    for page in AppSection.allCases {
+                        model.section = page
+                        try await capture(page.rawValue.lowercased() + "-" + language + (dark ? "-dark" : "-light") + ".png")
+                    }
+                    model.section = .migration
+                    model.correctModel("source")
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                    try await capture("model-correction-" + language + (dark ? "-dark" : "-light") + ".png")
+                    model.readerCorrection = nil
+                }
+            }
+            model.config.locale = "en"; NSApp.appearance = NSAppearance(named: .aqua)
+            cases.append("localized-four-page-and-model-warning-layout")
             cases.append("minimum-window-resize")
             let originalRuns = model.runs
             let longRow = RunEntry(id: "sample-long-batch-name-for-reading-setup-migration-and-recovery-2024-01-01",

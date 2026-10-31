@@ -195,13 +195,14 @@ def discover(mounts, key, usb=None):
     snapshots = []
     for index, mount in enumerate(mounts):
         mount = Path(mount)
-        warning, fatal = [], False
+        warning, warning_codes, fatal = [], [], False
         try:
             identity = read_identity(mount)
         except ReaderError:
             identity = {"serial": "", "code": None, "model": None, "fingerprint": "",
                         "device": mount.stat().st_dev, "inode": mount.stat().st_ino}
             warning.append("Reader identity cannot be read safely. Reconnect before continuing.")
+            warning_codes.append("missing_identity")
             fatal = True
         matches = [entry for entry in usb if identity["device"] in entry["devices"]]
         hardware = matches[0] if len(matches) == 1 else None
@@ -209,6 +210,7 @@ def discover(mounts, key, usb=None):
         if len(matches) > 1:
             fatal = True
             warning.append("The USB connection is ambiguous. Reconnect this reader.")
+            warning_codes.append("ambiguous_usb")
         elif hardware:
             codes = USB_MODELS.get(hardware["product"], set())
             names = {MODELS[c] for c in codes}
@@ -216,15 +218,20 @@ def discover(mounts, key, usb=None):
             if not hardware["serial"] or identity["serial"] != hardware["serial"]:
                 fatal = True
                 warning.append("USB identity does not match this volume. A model override cannot fix this; reconnect the reader.")
+                warning_codes.append("serial_mismatch")
             if identity["code"] in MODELS and codes and identity["code"] not in codes:
                 warning.append("The native model code and USB model disagree. Check the physical reader and confirm its model.")
+                warning_codes.append("model_conflict")
             if not codes:
                 warning.append("This USB product code is unknown. Check the physical model.")
+                warning_codes.append("unknown_usb")
         else:
             fatal = True
             warning.append("USB identity could not be cross-checked. Reconnect or use sequential mode; a model correction cannot establish identity.")
+            warning_codes.append("missing_usb")
         if identity["model"] is None:
             warning.append("The native model code is unknown. Choose and confirm the physical model.")
+            warning_codes.append("unknown_model")
         # Connection ID and mount device/metadata bind this choice to this insertion.
         state = {"mount": str(mount), "identity": identity, "usb": hardware,
                  "usb_available": usb_available}
@@ -239,7 +246,7 @@ def discover(mounts, key, usb=None):
                "model": identity["model"] or usb_model, "nativeModel": identity["model"],
                "modelCode": str(identity["code"]) if identity["code"] is not None else None,
                "usbModel": usb_model, "usbVerified": hardware is not None and not fatal,
-               "warning": " ".join(warning), "selectable": not fatal,
+               "warning": " ".join(warning), "warningCodes": warning_codes, "selectable": not fatal,
                "freeBytes": free, "totalBytes": total}
         snapshots.append({"public": row, "mount": mount, "state": state})
     # Cloned native identity is unsafe even when the two filesystem names differ.
@@ -247,6 +254,7 @@ def discover(mounts, key, usb=None):
     for snapshot, serial in zip(snapshots, serials):
         if serial and serials.count(serial) > 1:
             snapshot["public"]["selectable"] = False
+            snapshot["public"]["warningCodes"] = ["duplicate_identity"]
             snapshot["public"]["warning"] = "Two volumes have the same reader identity. Reconnect and resolve this before migrating."
     return snapshots
 

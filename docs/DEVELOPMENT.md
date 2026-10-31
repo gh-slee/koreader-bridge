@@ -5,6 +5,7 @@
 Current development source is **1.1.0-dev.1**. [Desktop architecture](DESKTOP_ARCHITECTURE.md) describes IPC, storage/lifecycle and safeguards; [Mac instructions](MACOS.md) document local signing and distribution.
 
 ```bash
+python3 scripts/check_native_locales.py
 python3 scripts/build_macos_app.py --launch
 python3 scripts/verify_macos_app.py "/path/to/KOReader Bridge.app"
 xcrun swiftc -swift-version 5 -typecheck -target arm64-apple-macos14.0 -import-objc-header macos/WindowCapture.h macos/KOReaderBridgeApp.swift macos/NativeChecks.swift
@@ -198,3 +199,9 @@ Editorial policy: preserve SOURCE/TARGET, mode/flag/status/category tokens and e
 ### PR authoring handoff
 
 Use the [canonical PR template](../.github/pull_request_template.md) and [maintainer publication workflow](MAINTAINING.md#pr-helper). Supply the actual diff scope, implemented behavior, compatibility, commands/results/skips and independent-review provenance. Keep self-testing, CI and human/hardware acceptance distinct; mark unavailable evidence explicitly. Rebuild the complete description when implementation or review changes. Required structure takes precedence over prose-polishing preferences.
+
+## Native language and review changes
+
+Edit all three `macos/locales/` catalogs together. English keys identify owned native labels; semantic helper/warning IDs have explicit English values. Keep named placeholders equivalent and never translate identifiers or user content. `scripts/check_native_locales.py` checks parity, duplicate keys, payload sizes and placeholders; the builder generates `.strings` resources and records catalog input hashes. Python CLI catalogs remain separate and compatible. Adding a native language also requires updating the allowlist, builder localization metadata, supported-language selector and native checks.
+
+Synthetic backend tests verify request-scoped review validation, prompt counts, cancellation with retained backups, missing/new/cloned identities, model exceptions and connection replacement at the final write boundary. Actual-app checks also exercise immediate bundle lookup, preference reopening, unchecked compatibility, the final default-cancel sheet and four-page/model-warning captures in both Chinese variants. These are fixture/visual checks, not physical migration or human translation approval.

@@ -252,3 +252,13 @@ Status: KM-014/KM-015/KM-016 Ready for test. Complete the implementation and run
 - Validate final default-No, same/changed-device guards, malformed archives, insufficient space, lock refusal and successful/blocked/failed rollback using disposable fixtures. Do not induce failures on real readers.
 - Expect safe English bootstrap diagnostics when catalogs cannot load, original Python-generated argparse/traceback messages, technical tokens and raw external diagnostics. These are deliberate boundaries, not unreviewed translation gaps.
 - Finish the existing mode, difference, saved-source, exact-restore, cleanup-preview and package checklists using the final reviewed build. Record human results together and retain recovery backups until sign-off.
+
+## Native review and language acceptance (1.1.0-dev.3)
+
+KM-027/KM-028 are Ready for test. Use isolated sample readers first; physical-reader operations need their own explicit scope. Existing hardware records do not sign off this changed interface.
+
+- In Settings, change Language among English, Traditional Chinese and Simplified Chinese. Check all four pages, empty/error/loading states, model correction and review sheets. Close/reopen and verify the selected language persists. Paths/model names and raw diagnostics remain original; prior activity is not retranslated.
+- With distinct connected sample readers, Preview changes should start directly. Start migration should show roles/scope, an unchecked FULL/KOREADER compatibility acknowledgement and default keep-target identity (new when missing). Back up and prepare must remain unavailable until required acknowledgements are supplied.
+- After required backups finish, check Ready to migrate: roles/scope are visible, the default Return action cancels and Migrate now is explicit. Cancel must leave TARGET unchanged and retain the recovery batch. A fresh operation must require a fresh review.
+- Unknown/conflicting/manual models still require attention. Reconnecting invalidates selection; identity changes after final confirmation must refuse writes. Confirm sequential mode/CLI retain their prompts, restore retains its own review, and cleanup still needs the exact DELETE text.
+- Review Chinese safety wording and compact-window wrapping with a human. Automated fixtures, screenshots, source publication and prior hardware success do not constitute this acceptance.

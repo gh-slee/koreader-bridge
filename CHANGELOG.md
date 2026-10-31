@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0-dev.3 — consolidated review and native languages
+
+- Consolidate connected-reader migration choices into one per-operation review, prepare verified backups automatically, and keep one final default-cancel write decision. Read-only previews start directly; identity revalidation, model exceptions, restore/deletion and CLI confirmations remain guarded.
+- Localize native pages, status labels, owned warnings and sheets in English, Traditional Chinese and Simplified Chinese. Switch immediately in Settings and retain the preference after reopening; preserve original user data and diagnostic boundaries.
+- Bundle validated standard macOS localization resources and extend synthetic backend/native checks for consent scope, failure cases, persistence and translated layouts. Hardware/user acceptance remains pending.
+
 ## 1.1.0-dev.2 — connected reader identities
 
 - Identify connected Kobo models from bounded native version metadata and cross-check USB storage ancestry, product IDs and serials. Use session-scoped opaque connection tokens; expose no raw serials or fingerprints through discovery.

@@ -30,3 +30,5 @@ New host directories use 0700 and files 0600. Existing output folders are not re
 There is no telemetry, runtime downloader or launch-time network requirement. Build-time runtime acquisition is pinned by size/SHA-256; maintainers must audit/update the lock for security fixes. Local ad-hoc signing is not Developer ID authentication or notarization. The development app has no App Sandbox entitlement; validation/OS permissions are not a claim of sandbox isolation.
 
 Public screenshots must be manually inspected sample-only captures with no personal paths or metadata. Synthetic USB discovery/eject does not certify hardware, rendering or recovery after power loss.
+
+Connected-reader migration review is scoped to one operation and the selected USB connections. Consolidating ordinary prompts does not grant blanket consent: model exceptions and final writes still stop, required archives are verified, and connection identity is rechecked before writes. Restore and deletion keep their dedicated confirmation rules. The CLI does not inherit desktop review choices. UI language changes do not alter safety decisions, paths, identifiers or stored backup schemas.

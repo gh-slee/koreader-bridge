@@ -187,6 +187,120 @@ class DesktopTests(unittest.TestCase):
         return {p.relative_to(path).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                 for p in path.rglob("*") if p.is_file() and not p.is_symlink()}
 
+    def reviewed(self, config, **changes):
+        config["review"] = {"rolesConfirmed": True, "compatible": True, "identity": "preserve", "cloneConfirmed": False}
+        config["review"].update(changes)
+        return config
+
+    def test_review_requires_bound_roles_and_typed_request_scoped_choices(self):
+        base = self.sample(); config, session, _ = self.bound_config(base, dry=False)
+        before = self.tree(base / "Attached/Target")
+        for changes in [{"rolesConfirmed": False}, {"rolesConfirmed": 1}, {"compatible": False},
+                        {"identity": []}, {"identity": "yes-all"}, {"identity": "clone"}, {"extra": True}]:
+            with self.subTest(changes=changes):
+                self.reviewed(config, **changes)
+                result, events = self.call("execute", config=config, fixture=base, readerSession=session)
+                self.assertFalse(result["ok"], result)
+                self.assertFalse(any(e["event"] == "prompt" for e in events))
+                self.assertEqual(self.tree(base / "Attached/Target"), before)
+        config.pop("readers"); self.reviewed(config)
+        result, _ = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertFalse(result["ok"])
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Reviewed transfer uses macOS ditto on isolated readers.")
+    def test_reviewed_transfer_has_one_final_prompt_and_retains_backups_on_decline(self):
+        base = self.sample(); config, session, _ = self.bound_config(base, dry=False)
+        self.reviewed(config); before = self.tree(base / "Attached/Target")
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session, decline=True)
+        self.assertEqual(result["data"]["status"], "cancelled", result)
+        prompts = [e for e in events if e["event"] == "prompt"]
+        self.assertEqual([e["key"] for e in prompts], ["confirm.migration"])
+        self.assertEqual(prompts[0]["kind"], "boolean")
+        self.assertEqual(self.tree(base / "Attached/Target"), before)
+        self.assertTrue(list(self.workspace.rglob("*.zip")))
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertEqual(result["data"]["status"], "success", result)
+        self.assertEqual([e["key"] for e in events if e["event"] == "prompt"], ["confirm.migration"])
+        config.pop("review"); config["dryRun"] = True
+        _, events = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertTrue(any(e.get("key") == "confirm.continue" for e in events))
+
+    def test_reviewed_readonly_preview_needs_no_compatibility_or_write_prompt(self):
+        base = self.sample(); config, session, _ = self.bound_config(base)
+        self.reviewed(config, compatible=False); before = self.tree(base / "Attached/Target")
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertEqual(result["data"]["exitCode"], 0, result)
+        self.assertFalse(any(e["event"] == "prompt" for e in events))
+        self.assertEqual(self.tree(base / "Attached/Target"), before)
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Saved-source review uses isolated macOS archives.")
+    def test_reviewed_saved_source_reuses_only_target_choice_and_keeps_final_consent(self):
+        base = self.sample(); config, session, _ = self.bound_config(base, dry=False)
+        self.reviewed(config)
+        result, _ = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertEqual(result["data"]["status"], "success", result)
+        saved = result["data"]["runID"]
+        config["action"] = "reuse"; config["runID"] = saved; config["readers"].pop("source")
+        config["sourceModel"] = "Kobo Unrelated Label"
+        before = self.tree(base / "Attached/Target")
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session, decline=True)
+        self.assertEqual(result["data"]["status"], "cancelled", result)
+        self.assertEqual([e["key"] for e in events if e["event"] == "prompt"], ["confirm.migration"])
+        self.assertEqual(self.tree(base / "Attached/Target"), before)
+        config["dryRun"] = True
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session)
+        self.assertEqual(result["data"]["exitCode"], 0, result)
+        self.assertFalse(any(e["event"] == "prompt" for e in events))
+
+    def test_structured_cleanup_reasons_and_duplicate_identity_warning_remain_available(self):
+        base = self.sample()
+        result, _ = self.call("catalog", fixture=base)
+        protected = [r for r in result["data"]["runs"] if r["protection"]]
+        self.assertTrue(protected)
+        self.assertTrue(all(r["protectionKey"].startswith("cleanup.reason_") for r in protected))
+        path = base / "Attached/Target/.kobo/version"
+        path.write_text(path.read_text().replace("TARGET-SAMPLE", "SOURCE-SAMPLE"))
+        result, _ = self.call("devices", fixture=base, readerSession="synthetic-warning-session-integration-1234")
+        self.assertTrue(all(not r["selectable"] and r["warningCodes"] == ["duplicate_identity"] for r in result["data"]["readers"]))
+
+    def test_review_cannot_suppress_manual_model_warning(self):
+        base = self.sample(); config, session, _ = self.bound_config(base)
+        self.reviewed(config); config["readers"]["source"]["model"] = "Kobo Clara 2E"
+        result, events = self.call("execute", config=config, fixture=base, readerSession=session, decline_model=True)
+        self.assertEqual(result["data"]["status"], "cancelled", result)
+        warning = next(e for e in events if e["event"] == "prompt")
+        self.assertEqual(warning["messageKey"], "prompt.model_correction")
+        self.assertEqual(warning["values"]["role"], "source")
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Write-boundary regression uses core macOS backups.")
+    def test_review_does_not_bypass_revalidation_at_final_write_boundary(self):
+        base = self.sample(); config, session, _ = self.bound_config(base, dry=False)
+        self.reviewed(config); before = self.tree(base / "Attached/Target")
+        def replace(packet):
+            if packet.get("key") == "confirm.migration":
+                path = base / ".bridge-usb.json"; rows = json.loads(path.read_text()); rows[1]["registry"] += 1; path.write_text(json.dumps(rows))
+        result, _ = self.call("execute", config=config, fixture=base, readerSession=session, on_prompt=replace)
+        self.assertNotEqual(result["data"]["exitCode"], 0, result)
+        self.assertEqual(self.tree(base / "Attached/Target"), before)
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Identity choices use isolated macOS runtime copies.")
+    def test_reviewed_identity_choices_and_missing_target_fallback(self):
+        for identity in ["preserve", "new", "clone", "missing"]:
+            with self.subTest(identity=identity):
+                base = self.sample(); config, session, _ = self.bound_config(base, dry=False)
+                config["mode"] = "koreader"
+                self.reviewed(config, identity=identity if identity != "missing" else "preserve", cloneConfirmed=identity == "clone")
+                settings = base / "Attached/Target/.adds/koreader/settings.reader.lua"
+                if identity == "missing":
+                    settings.write_text('return {}\n')
+                before = settings.read_text()
+                result, _ = self.call("execute", config=config, fixture=base, readerSession=session)
+                self.assertEqual(result["data"]["status"], "success", result)
+                after = settings.read_text()
+                if identity == "preserve": self.assertEqual(after, before)
+                elif identity == "clone": self.assertEqual(after, (base / "Attached/Source/.adds/koreader/settings.reader.lua").read_text())
+                else: self.assertNotEqual(after, before)
+
     def test_health_is_offline_versioned_and_has_no_workspace_writes(self):
         result, events = self.call("health")
         self.assertTrue(result["ok"])
