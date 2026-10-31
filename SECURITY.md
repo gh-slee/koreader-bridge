@@ -1,12 +1,12 @@
 # Security and privacy
 
-This tool handles private device files; the native desktop app is a development build. Only the current development version receives fixes; older copies should not be assumed to contain current safety checks.
+KOReader Bridge handles private files from your readers. The native desktop app is still in development. Fixes go into the current development version; older copies may lack newer safety checks.
 
 ## Reporting
 
 Do not post secrets, ebooks, raw device backups, unredacted logs, reading history, databases or serial numbers in public issues. Prefer a synthetic reproduction with the version, affected operation and a description of the failure. If GitHub's private vulnerability reporting is enabled for this repository, use its Security tab to report sensitive findings privately. Otherwise do not disclose exploit details or private data in public; request a private reporting route from the maintainer.
 
-Credential exposure requires revocation/rotation of affected credentials. Removing a file from Git or adding it to `.gitignore` does not revoke a secret or remove it from existing history.
+If credentials are exposed, revoke or rotate them. Deleting a file or adding it to `.gitignore` leaves both the credentials and earlier Git history unaffected.
 
 ## Safety boundaries
 
@@ -25,8 +25,10 @@ The app bundles a checksum-pinned CPython runtime and invokes an allowlisted hel
 
 Connected-reader discovery reads only bounded native identity metadata and macOS USB storage ancestry; it does not scan books or open the reader database. Serial comparison stays in helper memory. Discovery returns a session-keyed opaque token, model/warning/storage display fields, never the raw serial or fingerprint. Selected connections are revalidated at core write/restore/eject checks. Manual model correction requires confirmation and cannot repair missing/mismatched identity. Device metadata and USB descriptors are consistency checks, not cryptographic hardware attestation; other software and physically spoofed devices are outside this trust boundary. Sequential CLI operation retains its existing fingerprint guards.
 
-New host directories use 0700 and files 0600. Existing output folders are not recursively chmodded. Unknown preference fields and run data are retained; malformed/future preferences are not overwritten. Backups are unencrypted and may contain credentials.
+The app creates new host directories with permissions 0700 and files with 0600. It does not recursively change permissions in existing output folders. It preserves unknown preference fields and run data, and refuses to overwrite malformed preferences or formats from a newer version. Backups are unencrypted and may contain credentials.
 
 There is no telemetry, runtime downloader or launch-time network requirement. Build-time runtime acquisition is pinned by size/SHA-256; maintainers must audit/update the lock for security fixes. Local ad-hoc signing is not Developer ID authentication or notarization. The development app has no App Sandbox entitlement; validation/OS permissions are not a claim of sandbox isolation.
 
 Public screenshots must be manually inspected sample-only captures with no personal paths or metadata. Synthetic USB discovery/eject does not certify hardware, rendering or recovery after power loss.
+
+Connected-reader migration review is scoped to one operation and the selected USB connections. Consolidating ordinary prompts does not grant blanket consent: model exceptions and final writes still stop, required archives are verified, and connection identity is rechecked before writes. Restore and deletion keep their dedicated confirmation rules. The CLI does not inherit desktop review choices. UI language changes do not alter safety decisions, paths, identifiers or stored backup schemas.

@@ -4,7 +4,7 @@ Commands in this guide target current source via `koreader-bridge.py`. Keep the 
 
 [Home](../README.md) · [Usage](USAGE.md) · [Recovery](RECOVERY.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Development](DEVELOPMENT.md) · [Maintaining](MAINTAINING.md)
 
-Complete operating instructions for the macOS CLI. Start with the README quick start; review the mode and data behavior before approving device writes.
+Start with the README quick start, then use this guide for the macOS CLI's modes and options. Review which data each mode changes before approving writes.
 
 ## Requirements and compatibility
 
@@ -17,7 +17,7 @@ Complete operating instructions for the macOS CLI. Start with the README quick s
 | KOReader | FULL and KOREADER require an existing SOURCE installation with `reader.lua`, `frontend/` and `plugins/`. LIBRARY does not install KOReader. |
 | Space | Enough Mac space for source and target backups; enough target space for the planned replacement/copies. ZIP compression savings are not assumed. |
 
-SOURCE and TARGET are roles, not fixed model names. Each physical model must be confirmed by the operator. A model name found in KOReader logs is only a hint: a previous clone may have copied another device's log. Two different readers of the same model are allowed; identical fingerprints are refused.
+Choose which reader is SOURCE and which is TARGET, then confirm each physical model. KOReader logs provide only a model hint because a previous clone may have copied another reader's log. You can use two readers of the same model, but the tool refuses identical fingerprints.
 
 FULL and KOREADER copy the SOURCE runtime version and settings. The operator must confirm that this KOReader build is compatible with the TARGET hardware. The tool does not install a fresh model-specific build or automatically preserve hardware-specific settings. Support for entering a model label is not a claim that every Kobo model has been tested.
 
@@ -88,7 +88,7 @@ python3 koreader-bridge.py --mode full \
   --source-model "Kobo Clara BW" --target-model "Kobo Libra Colour" --dry-run
 ```
 
-Those names are examples, not a tested hardware pair. An incorrect or stale log hint can be overridden through physical-model confirmation. Identity guards still apply.
+The model names in that command are examples; this hardware pair has not been tested. Physical-model confirmation lets you correct a stale or incorrect log hint. It does not bypass identity checks.
 
 ## Language support
 
@@ -136,7 +136,7 @@ Development 3.3.0-dev.6 adds 123 entries and an editorial consistency pass acros
 
 ### Book discovery
 
-Discovery is based on case-insensitive filename extensions, not a complete content/DRM inventory. The built-in set is:
+The scanner recognises filename extensions without regard to case. It does not inspect every file's contents or provide a complete DRM inventory. Built-in extensions are:
 
 ```text
 epub kepub pdf cbz cbr cb7 cbt cba
@@ -170,7 +170,7 @@ Comics/issue.cbz             -> Comics/issue.sdr/
 
 Supported central metadata locations under `.adds/koreader` are `docsettings/`, `hashdocsettings/` and legacy `history/`. FULL/KOREADER include these through the runtime archive. Unscoped LIBRARY can copy these metadata trees without replacing the entire runtime. Lua files are copied/read as text; they are never evaluated.
 
-Metadata is copied, **not merged**. For scoped LIBRARY scans, unfiltered central metadata is omitted to avoid overwriting unrelated reading state. Keeping a conflicting TARGET book also protects its related source sidecars and conservatively omits central metadata from that LIBRARY transfer. A different edition at the same pathname can still have incompatible reading state; review the file plan.
+The tool copies metadata without merging it. Scoped LIBRARY scans omit unfiltered central metadata to protect unrelated reading state. If you keep a conflicting TARGET book, the tool also skips its source sidecars and central metadata for that transfer. Different editions can have incompatible reading state even at the same path, so review the file plan.
 
 ### Fonts
 
@@ -207,7 +207,7 @@ For whole-runtime migration, choose one KOReader `device_id` policy:
 2. Generate a new TARGET identity.
 3. Clone SOURCE identity exactly.
 
-This setting concerns KOReader's ID, not the Kobo hardware serial. The copied tree is verified before deliberate identity/cache adjustments. Other hardware-specific settings are copied from SOURCE; a selective preservation feature is still on the roadmap.
+This policy changes KOReader's ID; the Kobo hardware serial stays unchanged. The tool verifies the copied tree before adjusting identity and cache data. It copies other hardware-specific settings from SOURCE. Selectively preserving those settings is still planned.
 
 ## Command-line reference
 
@@ -273,7 +273,7 @@ Keep `locales/` with the script, including for English. Device migration require
 - FULL/KOREADER replace the runtime and source settings. Selective target hardware-setting preservation is not implemented.
 - `.kobo/version` is fingerprinted as a whole; a firmware change can change that fingerprint and block an older exact restore. There is no unsafe bypass option.
 - There is no interrupted-transfer resume, default library mirror deletion, wireless sync, scheduled cleanup or unattended migration.
-- Live-device safety and usability still need physical testing and human sign-off. Current feature status is recorded rather than assumed.
+- Physical testing and human sign-off are still needed to assess live-device safety and usability. Check the recorded feature status before relying on untested behavior.
 
 Planned work includes interrupted-transfer recovery, optional exact library mirroring, content-assisted discovery, reading-data conflict reports, portable hardware settings, settings-only migration and a separate archive verifier. These remain backlog items until implemented/tested.
 

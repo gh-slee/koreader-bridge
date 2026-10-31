@@ -1,6 +1,6 @@
 # KOReader Bridge development tracker
 
-Last reconciled: **2026-10-30**. Source snapshot version: **1.1.0-dev.2** (native desktop development; the published 1.0.0 remains a CLI release). [1.0.0-rc.1](https://github.com/gh-slee/koreader-bridge/releases/tag/v1.0.0-rc.1) was published on 2026-10-21 as a pre-release, not Latest. Check the release list for later published assets. Broader physical/manual acceptance remains pending. See [first-stable release gates](ACCEPTANCE.md#first-stable-release-gates) and the [version policy](docs/MAINTAINING.md#versioning-and-first-stable-release).
+Last reconciled: **2026-10-30**. Source snapshot version: **1.1.0-dev.3** (native desktop development; the published 1.0.0 remains a CLI release). [1.0.0-rc.1](https://github.com/gh-slee/koreader-bridge/releases/tag/v1.0.0-rc.1) was published on 2026-10-21 as a pre-release, not Latest. Check the release list for later published assets. Broader physical/manual acceptance remains pending. See [first-stable release gates](ACCEPTANCE.md#first-stable-release-gates) and the [version policy](docs/MAINTAINING.md#versioning-and-first-stable-release).
 
 Status vocabulary: `Queued`, `In progress`, `Ready for test`, `Blocked`, `Done`, `Deferred`. KM-011, KM-005, KM-001 and KM-003 are implemented and ready for user testing; ticket-wide human sign-off remains pending despite scoped KOREADER success. Entries represent planned work, not permission to operate physical devices or delete backups.
 
@@ -12,7 +12,7 @@ Use `koreader-bridge.py` as the canonical entry while retaining `kobo-koreader-m
 
 ## Mandatory runtime requirement (all tickets)
 
-Every current and future feature must be implemented as ordinary executable code that users can run directly from Terminal without any LLM. Do not depend on AI inference APIs, local/remote model servers, model downloads, an agent framework, or an active Codex/ChatGPT session. LLMs may assist authoring and maintenance only.
+Users must be able to run every current and future feature directly from Terminal as ordinary code. Runtime features must not depend on AI inference APIs, local or remote model servers, model downloads, an agent framework or an active Codex/ChatGPT session. LLM assistance is limited to authoring and maintenance.
 
 Acceptance for every ticket must include standalone CLI operation without AI API keys/services, explicit algorithmic rules, and documented commands/ordinary user confirmations where needed. Preserve the offline core migration/maintenance workflow. Copying existing KOReader AI-plugin files does not authorize executing them.
 
@@ -21,6 +21,8 @@ Acceptance for every ticket must include standalone CLI operation without AI API
 KM-025 implements a development SwiftUI app with Migration, Backups, Cleanup and Settings, bounded request/prompt JSON over the existing core, private persistent preferences, existing-batch reopening, sample readers, bundled pinned Python and ad-hoc local builds. Backend tests, actual app integration and visual inspection are separate from physical/user acceptance. Intel packaging, Developer ID/notarized distribution and a public DMG remain future work. Existing v1.0.0 releases/ticket sign-offs are unchanged.
 
 KM-026 adds native model-code recognition, USB-to-volume/identity cross-checks, connection-bound source/target selection, explicit manual model corrections and revalidation before writes. Two connected readers are supported by the desktop adapter while sequential mode/CLI remain compatible. Unknown/conflicting model labels require confirmation; identity failures cannot be overridden by labels. Automated synthetic verification and controlled real-device/user acceptance remain distinct.
+
+KM-027 consolidates ordinary connected-reader migration confirmations into one scoped review plus a final default-cancel write decision after verified backups. KM-028 localizes all four native pages and owned sheets in English, Traditional Chinese and Simplified Chinese, with immediate switching and retained preferences. Both are Ready for test; synthetic checks and human acceptance remain distinct.
 
 ## Current acceptance work
 
@@ -43,11 +45,11 @@ Scope is the existing four modes, migration/backup/recovery safeguards and three
 
 ## Device-support roadmap
 
-The broader name describes the project direction, not delivered multi-device support. Non-Kobo work is queued after the Kobo first-stable milestone and requires its own implementation scope.
+Support for other device families is planned after the first stable Kobo milestone. Each platform needs a defined implementation scope; the broader project name does not mean that support is already available.
 
-1. **KM-021 — Feasibility and support matrix:** research candidate device families, including Kindle, then choose the first platform and explicit migration directions. Record access/installation prerequisites, supported versions, host transport, runtime locations, identities, metadata and evidence gaps.
-2. **KM-022 — Portable data and platform safeguards:** define what can move between device families, what must remain on TARGET and which combinations must be refused. Do not assume copying a complete Kobo runtime is safe on another family. Preserve existing exact Kobo FULL/KOREADER semantics; new policies must be explicit. Coordinate with KM-007/008/009 for metadata/hardware/settings handling.
-3. **KM-023 — First non-Kobo adapter:** platform and supported directions remain to be selected after KM-021/022. Implement ordinary offline code, synthetic fixtures and controlled hardware acceptance, including capacity, backup, identity, path, rollback and restore behavior. Update user docs/support matrix only after the implemented scope is validated.
+1. **KM-021: Feasibility and support matrix:** research candidate device families, including Kindle, then choose the first platform and explicit migration directions. Record access/installation prerequisites, supported versions, host transport, runtime locations, identities, metadata and evidence gaps.
+2. **KM-022: Portable data and platform safeguards:** define what can move between device families, what must remain on TARGET and which combinations must be refused. Do not assume copying a complete Kobo runtime is safe on another family. Preserve existing exact Kobo FULL/KOREADER semantics; new policies must be explicit. Coordinate with KM-007/008/009 for metadata/hardware/settings handling.
+3. **KM-023: First non-Kobo adapter:** platform and supported directions remain to be selected after KM-021/022. Implement ordinary offline code, synthetic fixtures and controlled hardware acceptance, including capacity, backup, identity, path, rollback and restore behavior. Update user docs/support matrix only after the implemented scope is validated.
 
 No Kindle support, platform priority, delivery date or complete cross-platform migration guarantee is implied by these tickets. Add other device families through separately scoped tickets. Existing Kobo migration must remain available and its pending acceptance must not be marked complete by this roadmap.
 
@@ -81,6 +83,8 @@ No Kindle support, platform priority, delivery date or complete cross-platform m
 | KM-024 | P2 | Ready for test | Canonical CLI and runtime branding | Add koreader-bridge.py while retaining the shared legacy entry; align three-locale help/banner/preview and new manifest labels; preserve schemas, output root and locks. Coordinate docs/CI/checkers/publication allowlist and current/historical packaging. Verify equivalent offline CLI, cross-entry FULL/restore, shared locks, old manifests/packages and unchanged existing assets. Human wording acceptance remains pending. |
 | KM-025 | P1 | Ready for test | Native macOS application | SwiftUI/AppKit over shared core; bounded helper, bundled runtime, persistent unknown-safe preferences, existing batches, guarded operations and isolated real-app tests. Sample-only actual screenshots; physical user sign-off/notarized distribution pending. |
 | KM-026 | P1 | Ready for test | Bound reader selection and model corrections | Native model codes plus USB storage ancestry/serial consistency, distinct physical roles, session-only correction confirmation, write-boundary revalidation, dual-reader and sequential fixtures; physical GUI migration acceptance remains pending. |
+| KM-027 | P1 | Ready for test | Consolidated migration review | Bound migration/reuse review with explicit roles/compatibility/identity, automatic verified backup preparation and one final default-cancel write confirmation. Preview starts directly; model exceptions, restore, deletion and CLI behavior remain guarded. |
+| KM-028 | P1 | Ready for test | Native three-language interface | Immediate en/zh-Hant/zh-Hans switching across four pages and owned sheets; persistent locale, typed warning/progress IDs, native catalog parity and rendered compact layout checks. Human wording and real-user acceptance pending. |
 
 ## Completed baseline (verified in current code)
 
@@ -137,7 +141,7 @@ Status: KM-013 locale foundation is implemented in 3.3.0-dev.1 and Ready for tes
 | Traditional Chinese | zh-Hant | Initial Traditional Chinese interface, shared across supported regional aliases. |
 | Simplified Chinese | zh-Hans | Separately reviewed Simplified Chinese interface. |
 
-This is a proposed initial product scope, not a claim about market popularity. Use script tags rather than equating a script with a single country. Traditional and Simplified Chinese require independent wording review; do not publish an automatic character-conversion output as an accepted translation.
+These languages define the proposed initial scope; they were not selected as a market-popularity ranking. Use script tags because a script can be used in several countries. Review Traditional and Simplified Chinese wording independently. Automatic character conversion does not count as an accepted translation.
 
 Code, comments, identifiers and canonical developer documentation use English. Reviewed catalogs can localize owned user-facing text. Tool-owned diagnostic log messages remain English.
 
@@ -269,12 +273,12 @@ Do not auto-enable every JSON file found in locales/. Additional languages, righ
 - W3C language tags explain language/script/region distinctions and BCP 47 conventions: https://www.w3.org/International/articles/language-tags/
 - Python format-string syntax informs the deliberately restricted named-placeholder validator: https://docs.python.org/3.12/library/string.html#format-string-syntax
 
-These references inform the design; this plan chooses source-reviewable JSON catalogs rather than requiring compiled gettext .mo files.
+The design draws on these references and uses JSON catalogs that reviewers can read directly. Compiled gettext .mo files are not required.
 
 
 ## Documentation organization
 
-README.md is the concise entry point for installation, essential mode/data behavior, supported platforms, partial locale status and document navigation. Complete user, recovery, troubleshooting, developer and maintainer details now live in five topic guides under docs/. Shared AGENTS.md remains the agent entry point; this organization introduces no new agent-memory convention or migration runtime behavior.
+README.md covers installation, essential mode and data behavior, supported platforms, partial locale status and links to other docs. Five guides under docs/ cover usage, recovery, troubleshooting, development and maintenance in detail. Agents start with AGENTS.md. This organization changes neither agent-memory conventions nor migration behavior.
 
 The publication allowlist adds only the five exact reviewed Markdown paths; other docs/data paths remain blocked and all guide content still receives secret/path scanning. A regression covers both allowed paths and rejection of unknown/private paths or private content. Local validation passed: 117 tests, self-test, three-locale validation, 99 documentation link targets and 27 shell examples, plus worktree/history privacy and whitespace checks. Migration runtime and locale assets are unchanged. These results cover the local documentation batch; hosted CI for it requires publication. Physical/manual acceptance status is unchanged.
 
@@ -283,7 +287,7 @@ The publication allowlist adds only the five exact reviewed Markdown paths; othe
 
 Following PR #1, the default main checkout contains the complete implementation. Installation, CI badge scope, contributor base-branch instructions and release-preparation guidance now target main. This is a documentation-only correction; runtime/catalog behavior and all pending human acceptance tickets remain unchanged. Local checks passed: 100 document link targets, 27 shell examples, live main CI badge, publication privacy/history and whitespace. Runtime, catalogs, scripts and tests are unchanged; the full fixture suite was not repeated for this documentation-only correction.
 
-## KM-014 slice 1 — shared output routing
+## KM-014 slice 1: shared output routing
 
 Status: Ready for controlled testing as a scoped part of In progress KM-014, development 3.3.0-dev.3. The published 3.3.0-dev.2 ZIP/tag is unchanged. Adds explicit message-ID/parameter contracts, scoped console/English-log rendering, shared confirmations/progress/run/catalog/cleanup/difference labels, additive ui_locale metadata and 94 extracted entries per locale. Typed input rules and data/decision schemas stay stable; no LLM or network dependency.
 
@@ -291,7 +295,7 @@ The remaining message inventory is in docs/DEVELOPMENT.md. At slice 1, menus and
 
 Local slice validation passed 154 tests (16 new UI routing/workflow cases), self-test, 3x94 locale validation and worktree/history privacy checks. Slice 1 merged as PR #6 and main CI 39179925642 passed all six jobs; manual translation/hardware acceptance remains pending. These results do not change older tickets to Done.
 
-## KM-014 slice 2 — menus and basic inspection
+## KM-014 slice 2: menus and basic inspection
 
 Status: Ready for controlled testing as part of In progress KM-014, development 3.3.0-dev.4. Adds translated mode/identity/conflict menus, physical-model hints/confirmation and basic device/space summaries, including a LIBRARY capacity line. Adds 37 entries per locale (131 total) with explicit placeholder contracts. The plugin-specific configuration indicator is removed from console/logs; legacy saved metadata, generic plugin audits and whole-runtime verification remain compatible. Existing defaults, retries, model/fingerprint checks, space formulas and all device decisions remain unchanged.
 
@@ -299,7 +303,7 @@ Detailed errors, metadata/plugin diagnostics, raw diagnostic labelling and remai
 
 Slice 2 merged as PR #7 after 166 local tests/3x131 locale checks and all 12 push/PR jobs passed. All six [merged-main jobs](https://github.com/gh-slee/koreader-bridge/actions/runs/39183640983) also passed. This establishes automated evidence for slice 2 only; human wording review and hardware acceptance remain pending.
 
-## KM-014 slice 3 — workflow, recovery and selected refusals
+## KM-014 slice 3: workflow, recovery and selected refusals
 
 Status: Ready for controlled testing as part of In progress KM-014, development 3.3.0-dev.5. Adds 117 IDs (248 entries per locale) for migration/saved-source/target-restore plans, backup/verification/eject/identity notices, archive heartbeats, recovery guidance, five cancellation reasons and 36 selected refusals. Structured exceptions keep English string args; display rendering uses IDs and labels raw unconverted details without replacing text.
 

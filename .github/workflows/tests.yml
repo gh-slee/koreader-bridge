@@ -21,6 +21,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python scripts/check_publication.py --history
       - run: python scripts/check_locales.py
+      - run: python scripts/check_native_locales.py
       - run: python -m unittest discover -s tests -p 'test_*.py'
       - run: python koreader-bridge.py --self-test
       - run: python kobo-koreader-migrate.py --version

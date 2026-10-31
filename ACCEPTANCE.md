@@ -45,7 +45,7 @@ Status: Ready for test; no new physical acceptance is implied. Use a disposable 
 
 ## Validation record: 2026-10-22
 
-Keep these evidence sets separate; a later documentation commit does not rerun or extend them.
+Each result below applies to its recorded source and method. A later documentation edit does not rerun the tests or extend their scope.
 
 | Evidence set | Source and method | Observed result |
 | --- | --- | --- |
@@ -67,7 +67,7 @@ The current 42-case rehearsal covers:
 | Busy and released locks (2) | A busy owner refuses before device selection; a released lock's persistent filename does not block a new owner. |
 | Cleanup preview, wrong confirmation and explicit fixture deletion (3) | Preview/wrong text delete nothing; exact confirmation deletes only the selected eligible disposable batch and retains protected batches. |
 
-Font fixtures check bytes, not font rendering. Synthetic fixtures and mocked transport cannot validate firmware, controls, plugins or reading behavior. These 42 cases are separate from the 194-test unit suite. The historical RC1 rehearsal also passed 42 cases at its own commit; it is not the source of the current-baseline result.
+Font fixtures compare bytes; rendering still needs a device check. Synthetic fixtures and mocked transport cannot validate firmware, controls, plugins or reading behavior. These 42 cases ran separately from the 194-test unit suite. RC1 also passed 42 rehearsal cases at its own commit, with a separate result from the current baseline.
 
 Human review has accepted the four Traditional Chinese behavior summaries for FULL, KOREADER, exact restore and cleanup, and the presented historical RC1 offline results. That review does not sign off all three 371-entry catalogs, operator-performed tests of the current rehearsal, complete feature tickets or stable publication. Raw reports, device identifiers, book names and recovery archives remain private.
 
@@ -81,7 +81,7 @@ Human review has accepted the four Traditional Chinese behavior summaries for FU
 
 ## First stable release gates
 
-The `1.0.0` release baseline retains FULL, KOREADER, LIBRARY and AUDIT with the existing safety and compatibility contract. Publication review may accept the disclosed validation limits below; complete physical testing of every mode and complete manual review are follow-up work, not claims implied by the stable version. The final source/asset approval must explicitly cover this scope. The earlier comprehensive acceptance checklist remains useful; incomplete items stay open rather than being marked passed.
+The `1.0.0` baseline keeps FULL, KOREADER, LIBRARY and AUDIT under the existing safety and compatibility contract. Release review may accept the validation limits below. Physical tests of every mode and the remaining manual review continue as follow-up work; the stable version does not certify those tests. Final source and asset approval must cover this scope explicitly. Keep using the comprehensive checklist and leave unfinished items open.
 
 | Area | Evidence and remaining limits | Release treatment |
 | --- | --- | --- |
@@ -173,7 +173,7 @@ After reviewing the restore preview, a controlled restore should return the affe
 
 ## Sign-off record
 
-Record version, tested macOS/Python versions, hardware model pair, modes tested, ticket IDs, result and remaining problems. Keep serial numbers, book names and private reports out of public records. Leave each ticket Ready for test until explicit human acceptance is recorded.
+For each sign-off, record the tool, macOS and Python versions, hardware pair, modes, ticket IDs, result and remaining problems. Omit serial numbers, book names and private reports from public records. Leave a ticket Ready for test until a human explicitly accepts it.
 
 
 ## KM-013: locale foundation (3.3.0-dev.1)
@@ -252,3 +252,13 @@ Status: KM-014/KM-015/KM-016 Ready for test. Complete the implementation and run
 - Validate final default-No, same/changed-device guards, malformed archives, insufficient space, lock refusal and successful/blocked/failed rollback using disposable fixtures. Do not induce failures on real readers.
 - Expect safe English bootstrap diagnostics when catalogs cannot load, original Python-generated argparse/traceback messages, technical tokens and raw external diagnostics. These are deliberate boundaries, not unreviewed translation gaps.
 - Finish the existing mode, difference, saved-source, exact-restore, cleanup-preview and package checklists using the final reviewed build. Record human results together and retain recovery backups until sign-off.
+
+## Native review and language acceptance (1.1.0-dev.3)
+
+KM-027/KM-028 are Ready for test. Use isolated sample readers first; physical-reader operations need their own explicit scope. Existing hardware records do not sign off this changed interface.
+
+- In Settings, change Language among English, Traditional Chinese and Simplified Chinese. Check all four pages, empty/error/loading states, model correction and review sheets. Close/reopen and verify the selected language persists. Paths/model names and raw diagnostics remain original; prior activity is not retranslated.
+- With distinct connected sample readers, Preview changes should start directly. Start migration should show roles/scope, an unchecked FULL/KOREADER compatibility acknowledgement and default keep-target identity (new when missing). Back up and prepare must remain unavailable until required acknowledgements are supplied.
+- After required backups finish, check Ready to migrate: roles/scope are visible, the default Return action cancels and Migrate now is explicit. Cancel must leave TARGET unchanged and retain the recovery batch. A fresh operation must require a fresh review.
+- Unknown/conflicting/manual models still require attention. Reconnecting invalidates selection; identity changes after final confirmation must refuse writes. Confirm sequential mode/CLI retain their prompts, restore retains its own review, and cleanup still needs the exact DELETE text.
+- Review Chinese safety wording and compact-window wrapping with a human. Automated fixtures, screenshots, source publication and prior hardware success do not constitute this acceptance.

@@ -143,6 +143,7 @@ def reader_inventory(m, request):
     for snapshot, serial in zip(result, serials):
         if serial and serials.count(serial) > 1:
             snapshot["public"]["selectable"] = False
+            snapshot["public"]["warningCodes"] = ["duplicate_identity"]
             snapshot["public"]["warning"] = "Two sample volumes have the same identity."
     return result
 
@@ -185,7 +186,7 @@ def bounded_json(path):
 def catalog(m, project, keep=2):
     plan = m.cleanup_plan(project, keep)
     eligible = {x["run_id"] for x in plan["candidates"]}
-    protected = {x["run_id"]: sanitize(x["reason"]) for x in plan["protected"]}
+    protected = {x["run_id"]: x["reason"] for x in plan["protected"]}
     records = []
     for row in m.run_catalog(project)[-500:]:
         ident = row["run_id"]
@@ -195,7 +196,8 @@ def catalog(m, project, keep=2):
         records.append({"id": ident, "status": row["status"], "operation": row["operation"],
                         "bytes": row["bytes"], "endedAt": row.get("ended_at") or "",
                         "targetModified": bool(row.get("target_modified")), "eligible": ident in eligible,
-                        "protection": protected.get(ident, ""),
+                        "protection": sanitize(protected.get(ident, "")),
+                        "protectionKey": getattr(protected.get(ident), "key", None),
                         "canReuse": (folder / "source-snapshot.json").is_file(),
                         "canRestore": (folder / "target-snapshot.json").is_file() and (folder / "target-changes.json").is_file()})
     return {"runs": sorted(records, key=lambda x: (x["endedAt"], x["id"]), reverse=True), "reclaimableBytes": plan["reclaimable_bytes"]}
@@ -321,7 +323,7 @@ class EventStream(io.TextIOBase):
 def execute(m, request, project):
     config = request.get("config", {})
     allowed = {"action", "mode", "dryRun", "sourceModel", "targetModel", "locale", "books",
-               "fonts", "readingData", "conflict", "runID", "includeDirs", "excludeDirs", "extensions", "readers"}
+               "fonts", "readingData", "conflict", "runID", "includeDirs", "excludeDirs", "extensions", "readers", "review"}
     if not isinstance(config, dict) or set(config) - allowed:
         raise ProtocolError("Unsupported workflow option.")
     action = config.get("action", "migration")
@@ -347,6 +349,20 @@ def execute(m, request, project):
             config[role + "Model"] = model
         if action == "reuse":
             config["sourceModel"] = ""  # The verified saved source defines this role.
+    review = config.get("review")
+    readonly = dry or mode == "audit"
+    if review is not None:
+        if not bindings or action not in {"migration", "reuse"}:
+            raise ProtocolError("Simplified review requires explicitly bound migration readers.")
+        if (not isinstance(review, dict) or set(review) != {"rolesConfirmed", "compatible", "identity", "cloneConfirmed"}
+                or any(type(review[k]) is not bool for k in ["rolesConfirmed", "compatible", "cloneConfirmed"])
+                or review["rolesConfirmed"] is not True or not isinstance(review["identity"], str)
+                or review["identity"] not in {"preserve", "new", "clone"}):
+            raise ProtocolError("Review the exact reader roles and migration choices before continuing.")
+        if mode in {"full", "koreader"} and not readonly and not review["compatible"]:
+            raise ProtocolError("Confirm the source KOReader build is compatible with the target in the review.")
+        if review["identity"] == "clone" and not readonly and not review["cloneConfirmed"]:
+            raise ProtocolError("Cloning source identity requires an explicit review acknowledgement.")
     args = ["koreader-bridge.py", "--backup-dir", str(project), "--locale", locale]
     if dry:
         args.append("--dry-run")
@@ -395,16 +411,39 @@ def execute(m, request, project):
             return original_choose(question, options, default)
         finally:
             choices = []
+    class DesktopPrompt(str):
+        def __new__(cls, text, role, model, codes):
+            value = str.__new__(cls, text)
+            value.native_values = {"role": role, "model": model}
+            value.warning_codes = codes
+            return value
     def read(ui, prompt, suffix=""):
+        key = getattr(prompt, "key", "")
+        # Reuse only this request's explicit, immutable review. Never auto-answer
+        # final writes, recovery, deletion or unrecognized/exception prompts.
+        if review is not None:
+            accepted = key in {"confirm.continue", "confirm.saved_source"}
+            if key == "confirm.compatibility":
+                accepted = readonly or review["compatible"]
+            if key == "confirm.device":
+                values = getattr(prompt, "values", {})
+                role = {"SOURCE": "source", "TARGET": "target"}.get(values.get("role"))
+                if role in bindings.roles:
+                    snapshot, chosen = checked_role(role)
+                    accepted = m.canonical_model(values.get("model")).casefold() == chosen.casefold()
+            if accepted:
+                emit("log", text="Using this operation's reviewed choice. Identity checks remain active.", messageKey="progress.reviewed")
+                return "y"
         ui.write(prompt, end=suffix)
         stream.flush()
         ident = uuid.uuid4().hex
-        key = getattr(prompt, "key", "")
         kind = "choice" if key == "prompt.selection" else "boolean" if "[y/N]" in suffix or "[Y/n]" in suffix else "continue" if key in {"prompt.source", "prompt.target", "prompt.restore_target"} else "text"
         required = "DELETE " + config.get("runID", "") if key == "prompt.confirmation" and action == "delete" else ""
         displayed = choice_title if kind == "choice" else re.sub(r"\s*\[(?:y/N|Y/n)\]:?\s*$", "", ui.text(prompt) + suffix)
         emit("prompt", promptID=ident, key=key, text=sanitize(displayed),
-             kind=kind, choices=choices, context=LAST_LINES[-8:], requiredText=required)
+             kind=kind, choices=choices, context=LAST_LINES[-8:], requiredText=required,
+             **({"messageKey": "prompt.model_correction", "values": prompt.native_values, "warningCodes": prompt.warning_codes}
+                if isinstance(prompt, DesktopPrompt) else {}))
         try:
             reply = read_packet(900)
             if set(reply) != {"version", "id", "operation", "promptID", "text"} or reply["operation"] != "reply" or reply["id"] != REQUEST_ID or reply["promptID"] != ident:
@@ -425,7 +464,7 @@ def execute(m, request, project):
         base = sample_base(fixture, project)
         m.VOLUME_ROOT = base / "NeverRealVolumes"
         m.wait_for_single_kobo = lambda role: base / ("Source" if role == "SOURCE" else "Target")
-        m.safe_eject = lambda path: emit("log", text="Sample reader disconnected (simulated USB).")
+        m.safe_eject = lambda path: emit("log", text="Sample reader disconnected (simulated USB).", messageKey="progress.sample-disconnected")
         original_spinner = m.run_with_spinner
         def fixture_spinner(cmd, label, env=None):
             if not ((cmd[:4] == ["ditto", "-c", "-k", "--keepParent"] and len(cmd) == 6) or (cmd[:3] == ["ditto", "-x", "-k"] and len(cmd) == 5)):
@@ -446,7 +485,7 @@ def execute(m, request, project):
             warning = row["warning"]
             if not row["model"] or row["model"].casefold() != chosen.casefold():
                 warning += " The selected model overrides automatic identification."
-            if warning and not m.prompt_yes_no(warning + " Confirm the physical " + role.upper() + " is " + chosen + "?", default=False):
+            if warning and not m.prompt_yes_no(DesktopPrompt(warning + " Confirm the physical " + role.upper() + " is " + chosen + "?", role, chosen, row.get("warningCodes", [])), default=False):
                 raise m.MigrationCancelled("Reader model correction was not confirmed.")
         def check_path(path):
             try:
@@ -471,11 +510,11 @@ def execute(m, request, project):
         original_emit, original_input = m.ui_emit, m.ui_input
         def selected_emit(key, **values):
             if key in {"workflow.disconnect", "workflow.unplug_source", "saved_source.connect"}:
-                emit("log", text="Using explicitly selected readers. Keep the target connected until the operation finishes.")
+                emit("log", text="Using explicitly selected readers. Keep the target connected until the operation finishes.", messageKey="progress.selected-readers")
             elif key == "device.log_hint":
-                emit("log", text="Native model metadata and USB connection were checked. Confirm the physical reader; model labels do not establish identity.")
+                emit("log", text="Native model metadata and USB connection were checked. Confirm the physical reader; model labels do not establish identity.", messageKey="progress.identity-checked")
             elif key == "device.model_mismatch":
-                emit("log", text="Automatic model identification differs from the chosen physical model. Confirm this correction carefully.")
+                emit("log", text="Automatic model identification differs from the chosen physical model. Confirm this correction carefully.", messageKey="progress.model-mismatch")
             else:
                 return original_emit(key, **values)
         def selected_input(prompt):
@@ -491,6 +530,14 @@ def execute(m, request, project):
                     return snapshot["public"]["model"] or original_detect(mount)
             return original_detect(mount)
         m.detect_model = native_model
+        if review is not None:
+            def reviewed_identity(target_device_id):
+                chosen = review["identity"]
+                if chosen == "preserve" and not target_device_id:
+                    emit("log", text="Target identity is missing; a new KOReader identity will be generated, as reviewed.", messageKey="progress.new-identity")
+                    return "new"
+                return chosen
+            m.choose_identity_mode = reviewed_identity
     original_confirm = m.confirm_role_model
     def confirm_model(info, requested, role):
         if bindings:

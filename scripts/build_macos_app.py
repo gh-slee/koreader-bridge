@@ -15,6 +15,7 @@ import subprocess
 import tarfile
 import tempfile
 import uuid
+from check_native_locales import INPUTS as NATIVE_INPUTS, write_resources
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_INPUTS = [
@@ -60,7 +61,7 @@ def build(output_root, runtime_archive=None):
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise ValueError("This build targets Apple Silicon macOS only. Intel runtime packaging is not implemented.")
     from check_publication import inspect_blob
-    for name in BACKEND_INPUTS + SWIFT_INPUTS + ["desktop/runtime-lock.json"]:
+    for name in BACKEND_INPUTS + SWIFT_INPUTS + NATIVE_INPUTS + ["desktop/runtime-lock.json", "scripts/check_native_locales.py"]:
         path = ROOT / name
         if path.is_symlink() or not path.is_file() or inspect_blob(name, path.read_bytes()):
             raise ValueError("A required source input is missing or failed publication checks: " + name)
@@ -91,6 +92,7 @@ def build(output_root, runtime_archive=None):
     binary_dir = contents / "MacOS"
     binary_dir.mkdir(parents=True)
     resources.mkdir()
+    write_resources(resources)
     backend = resources / "backend"
     for name in BACKEND_INPUTS:
         target = backend / name
@@ -135,7 +137,8 @@ def build(output_root, runtime_archive=None):
     info = {
         "CFBundleExecutable": "KOReaderBridge", "CFBundleIdentifier": "io.github.gh-slee.koreader-bridge",
         "CFBundleName": "KOReader Bridge", "CFBundleDisplayName": "KOReader Bridge",
-        "CFBundleShortVersionString": "1.1.0", "CFBundleVersion": "2",
+        "CFBundleShortVersionString": "1.1.0", "CFBundleVersion": "3",
+        "CFBundleDevelopmentRegion": "en", "CFBundleLocalizations": ["en", "zh-Hant", "zh-Hans"],
         "CFBundlePackageType": "APPL", "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundleIconFile": "Bridge", "LSMinimumSystemVersion": "14.0",
         "NSHighResolutionCapable": True, "NSPrincipalClass": "NSApplication",
@@ -147,9 +150,9 @@ def build(output_root, runtime_archive=None):
     if not licenses:
         raise ValueError("Runtime license notices are missing.")
     metadata = {
-        "schema_version": 1, "app": "KOReader Bridge", "development_version": "1.1.0-dev.2",
+        "schema_version": 1, "app": "KOReader Bridge", "development_version": "1.1.0-dev.3",
         "architecture": "arm64", "minimum_macos": "14.0", "python": lock,
-        "source_inputs": {name: sha(ROOT / name) for name in BACKEND_INPUTS + SWIFT_INPUTS},
+        "source_inputs": {name: sha(ROOT / name) for name in BACKEND_INPUTS + SWIFT_INPUTS + NATIVE_INPUTS},
         "signing": "ad-hoc local", "notarized": False, "runtime_license_files": len(licenses),
         "contains_device_data": False, "network_at_launch": False,
     }

@@ -6,8 +6,9 @@ facts, risk and uncertainty. Never include private context, owner paths or data.
 
 ## Change Summary
 
-<!-- One sentence: problem and resulting behavior. Then 2-6 focused bullets about
-meaningful outcomes/decisions. Avoid marketing, background and development diaries. -->
+<!-- Explain the problem and resulting behavior in one sentence. Use 2-6 focused
+bullets for the changes and decisions a reviewer needs to understand. Leave out
+marketing copy and session history. -->
 
 ## Files Changed
 
@@ -34,10 +35,10 @@ Use NOT RUN when none occurred. Developer self-testing belongs above. -->
 
 ### Required Pre-PR Validation
 
-<!-- Actual publication/privacy and applicable core/native checks against reviewed
-source; include app build/launch/visual evidence for desktop changes. Record PASS /
-FAIL / NOT RUN / N/A with explanations and preserve existing approval gates.
-Fixtures and automated UI checks are not hardware or human acceptance. -->
+<!-- Report publication/privacy checks and the core/native checks required for this
+source. For desktop changes, include build, launch and visual results. Use PASS /
+FAIL / NOT RUN / N/A and explain gaps. Follow existing approval requirements.
+Fixtures and automated UI checks do not replace hardware or human acceptance. -->
 
 ## Behavior & Compatibility
 

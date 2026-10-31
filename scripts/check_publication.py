@@ -24,6 +24,8 @@ EXACT.update({
     'bridge_desktop_helper.py', 'bridge_devices.py', 'PRODUCT.md', 'DESIGN.md',
     'macos/KOReaderBridgeApp.swift', 'macos/NativeChecks.swift', 'macos/Icon.swift',
     'macos/WindowCapture.h', 'macos/WindowCapture.c',
+    'macos/locales/en.json', 'macos/locales/zh-Hant.json', 'macos/locales/zh-Hans.json',
+    'scripts/check_native_locales.py',
     'desktop/runtime-lock.json', 'scripts/build_macos_app.py', 'scripts/verify_macos_app.py',
     'docs/MACOS.md', 'docs/DESKTOP_ARCHITECTURE.md',
     'assets/desktop/migration-light.png', 'assets/desktop/migration-dark.png',
