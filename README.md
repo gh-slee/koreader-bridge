@@ -10,6 +10,7 @@
 <p align="center">
   <a href="#macos-app"><img alt="Native SwiftUI app" src="https://img.shields.io/badge/SwiftUI-macOS_14%2B-008080?style=flat-square&amp;logo=swift&amp;logoColor=white"/></a>
   <a href="https://github.com/gh-slee/koreader-bridge/actions/workflows/tests.yml?query=branch%3Amain"><img alt="Main branch CI status" src="https://github.com/gh-slee/koreader-bridge/actions/workflows/tests.yml/badge.svg?branch=main&amp;event=push"/></a>
+  <a href="https://github.com/sponsors/gh-slee"><img src="https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?style=flat-square&amp;logo=githubsponsors&amp;logoColor=white" alt="Sponsor gh-slee on GitHub"></a>
   <a href="#tech-stack"><img alt="Python 3.9 or newer" src="https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white"/></a>
   <a href="#requirements"><img alt="Device migration requires macOS" src="https://img.shields.io/badge/macOS-USB_migration-111827?style=flat-square&amp;logo=apple&amp;logoColor=white"/></a>
   <a href="#tech-stack"><img alt="Runtime dependencies: Python standard library" src="https://img.shields.io/badge/dependencies-standard_library-0F766E?style=flat-square"/></a>
@@ -25,7 +26,8 @@
   <a href="#tech-stack">Tech stack</a> ·
   <a href="#language-support">Languages</a> ·
   <a href="#contributing">Contribute</a> ·
-  <a href="https://github.com/gh-slee/koreader-bridge/issues">Report a bug</a>
+  <a href="https://github.com/gh-slee/koreader-bridge/issues">Report a bug</a> ·
+  <a href="#support-this-project">Support</a>
 </p>
 
 > [!IMPORTANT]
@@ -264,7 +266,11 @@ Report reproducible bugs and feature requests through [GitHub Issues](https://gi
 
 ## Support this project
 
-If you find this project useful, consider [sponsoring on GitHub](https://github.com/sponsors/gh-slee) to support ongoing development, bug fixes, testing, documentation, and maintenance.
+If KOReader Bridge makes moving to a new reader a little less stressful, I'm glad it's useful. Sponsorship helps me keep working on the migration and recovery tools, test the awkward edge cases and make the guides easier to follow.
+
+[❤️ Sponsor on GitHub](https://github.com/sponsors/gh-slee)
+
+You can also help with a [star](https://github.com/gh-slee/koreader-bridge/stargazers), a [bug report](https://github.com/gh-slee/koreader-bridge/issues) or a [contribution](CONTRIBUTING.md). Thank you!
 
 Sponsorship is entirely optional. All features remain free and open source.
 
