@@ -77,6 +77,16 @@ List existing runs first:
 python3 koreader-bridge.py --list-runs
 ```
 
+### Verify a saved batch
+
+Check a batch's archives before relying on it, without connecting a Kobo:
+
+```bash
+python3 koreader-bridge.py --verify-run <run-id>
+```
+
+The check pairs each `*.zip` with its `*.manifest.json` and applies the same rules used before saved-source and restore writes: archive SHA-256, member sizes and hashes, unsafe or duplicate paths, unlisted members and snapshot references. It lists each artifact as verified or failed and exits with status 1 if anything fails. It reads only; it never repairs, rewrites or deletes files. A batch still marked `running` may be incomplete. Saved-source and restore commands verify again before writing, so a passing result does not replace those checks.
+
 ### Reuse a saved SOURCE
 
 ```bash

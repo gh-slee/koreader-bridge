@@ -374,6 +374,20 @@
     "recovery.payload_error": "数据文件：{detail}",
     "recovery.runtime_error": "KOReader：{detail}",
     "value.true": "是",
-    "value.false": "否"
+    "value.false": "否",
+    "help.verify_run": "依清单验证单一已保存批次的归档；只读，不需要连接 Kobo。",
+    "argument.verify_settings": "--verify-run 只会读取已保存的批次；只能搭配 --backup-dir 与 --locale 调整操作。",
+    "verify.heading": "备份验证（只读）：{run_id}",
+    "verify.running": "此批次仍标示为运行中；其归档可能不完整。",
+    "verify.empty": "此批次中找不到归档或清单。",
+    "verify.passed": "验证通过 [{kind}]：{name}",
+    "verify.failed": "验证失败 {name}：{detail}",
+    "verify.summary": "验证完成：{verified} 个通过，{failed} 个失败。未更改任何数据。",
+    "error.verify_symlink": "含有符号链接的已保存批次无法验证。",
+    "error.verify_unpaired": "归档与清单必须同时存在。",
+    "error.verify_referenced_missing": "快照引用的文件丢失：{name}",
+    "error.verify_manifest_kind": "清单并非 KOReader 或书库归档的清单。",
+    "error.verify_archive_name": "清单属于另一个归档：{name}",
+    "error.verify_unreadable": "无法读取归档：{detail}"
   }
 }
