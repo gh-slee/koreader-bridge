@@ -91,7 +91,7 @@ Reverify later using the printed directory and an independently chosen expected 
 python3 scripts/prepare_release.py verify DIRECTORY --ref COMMIT
 ```
 
-Verification reads Git again, checks the ZIP against its checksum and record, rejects missing, extra or duplicate members, and reruns the extracted checks. A replaced checksum or preparation record cannot establish provenance on its own. Local Git objects are required. KM-010 tracks a separate standalone Kobo-backup verifier. For downloaded releases, `shasum -a 256 -c SHA256SUMS` detects mismatches with the supplied checksum; it does not authenticate the publisher.
+Verification reads Git again, checks the ZIP against its checksum and record, rejects missing, extra or duplicate members, and reruns the extracted checks. A replaced checksum or preparation record cannot establish provenance on its own. Local Git objects are required. Kobo backups have a separate verifier, `--verify-run` (KM-010). For downloaded releases, `shasum -a 256 -c SHA256SUMS` detects mismatches with the supplied checksum; it does not authenticate the publisher.
 
 CI runs preparation for its checked-out commit on all supported fixture hosts and Python versions. It does not upload packages or publish releases. Human publication review must still cover release notes, public metadata, exact commit/assets and remaining acceptance limitations. The helper does not generate or publish release notes, create tags, push branches or access the network/devices. Upload only the reviewed ZIP and checksum; keep PREPARATION.json local. A published pre-release invites controlled testing and is distinct from stable-release acceptance.
 

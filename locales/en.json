@@ -375,6 +375,20 @@
     "recovery.payload_error": "Payload: {detail}",
     "recovery.runtime_error": "KOReader: {detail}",
     "value.true": "True",
-    "value.false": "False"
+    "value.false": "False",
+    "help.verify_run": "Verify one saved batch's archives against their manifests, read-only and without connecting a Kobo.",
+    "argument.verify_settings": "--verify-run only reads a saved batch; only --backup-dir and --locale may customize it",
+    "verify.heading": "BACKUP VERIFICATION (read-only): {run_id}",
+    "verify.running": "This batch is still marked running; its archives may be incomplete.",
+    "verify.empty": "No archives or manifests found in this batch.",
+    "verify.passed": "Verified [{kind}]: {name}",
+    "verify.failed": "FAILED {name}: {detail}",
+    "verify.summary": "Verification finished: {verified} verified, {failed} failed. Nothing was changed.",
+    "error.verify_symlink": "Saved batches containing symlinks cannot be verified.",
+    "error.verify_unpaired": "Archive and manifest must both be present.",
+    "error.verify_referenced_missing": "Snapshot references a missing file: {name}",
+    "error.verify_manifest_kind": "Manifest does not describe a KOReader or library archive.",
+    "error.verify_archive_name": "Manifest belongs to a different archive: {name}",
+    "error.verify_unreadable": "Archive could not be read: {detail}"
   }
 }

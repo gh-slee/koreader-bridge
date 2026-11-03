@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0-dev.4: standalone backup verification
+
+- Add `--verify-run RUN_ID` to check every archive/manifest pair in one saved batch without a Kobo: archive SHA-256, member sizes/hashes, unsafe or duplicate paths, unlisted members, unpaired files and missing snapshot references. Verification is read-only, reports each artifact and exits 1 when any check fails.
+- Reuse the saved-source/restore verifier, so standalone results follow the same rules as pre-write checks. Catalog the new text in English, Traditional Chinese and Simplified Chinese. The native app is unchanged.
+
 ## 1.1.0-dev.3: consolidated review and native languages
 
 - Consolidate connected-reader migration choices into one per-operation review, prepare verified backups automatically, and keep one final default-cancel write decision. Read-only previews start directly; identity revalidation, model exceptions, restore/deletion and CLI confirmations remain guarded.

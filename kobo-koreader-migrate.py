@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 PROJECT_NAME = "KOReader Bridge"
-VERSION = "1.1.0-dev.3"
+VERSION = "1.1.0-dev.4"
 DEFAULT_BACKUP_DIR = Path(__file__).resolve().parent
 VOLUME_ROOT = Path("/Volumes")
 
@@ -127,6 +127,7 @@ LOCALE_REQUIRED_IDS = frozenset({
     'help.self_test',
     'help.source_model',
     'help.target_model',
+    'help.verify_run',
     'help.version',
     'mode.audit',
     'mode.full',
@@ -415,6 +416,9 @@ UI_MESSAGE_FIELDS = {
     'cleanup.heading': set(), 'cleanup.empty': set(), 'cleanup.reclaimable': {'size'},
     'cleanup.protected': {'run_id', 'reason'}, 'cleanup.confirm': {'expected'},
     'cleanup.cancelled': set(), 'cleanup.deleted': {'run_id'},
+    'verify.heading': {'run_id'}, 'verify.running': set(), 'verify.empty': set(),
+    'verify.passed': {'name', 'kind'}, 'verify.failed': {'name', 'detail'},
+    'verify.summary': {'verified', 'failed'},
     'difference.title': set(), 'difference.retain': set(),
     'difference.section': {'label', 'count', 'size'}, 'difference.paths': {'path'},
     'difference.new': set(), 'difference.overwrite': set(), 'difference.identical': set(),
@@ -647,6 +651,12 @@ UI_MESSAGE_FIELDS = {
     'error.manifest_entry': {'path'},
     'error.saved_archive_checksum': {'name'},
     'error.saved_zip_duplicate': set(),
+    'error.verify_symlink': set(),
+    'error.verify_unpaired': set(),
+    'error.verify_referenced_missing': {'name'},
+    'error.verify_manifest_kind': set(),
+    'error.verify_archive_name': {'name'},
+    'error.verify_unreadable': {'detail'},
     'error.payload_members': set(),
     'error.payload_directory_entry': set(),
     'error.saved_payload_symlink': set(),
@@ -696,6 +706,7 @@ UI_MESSAGE_FIELDS = {
     'argument.keep_minimum': set(),
     'argument.restore_settings': set(),
     'argument.preview_settings': set(),
+    'argument.verify_settings': set(),
     'lock.project': set(),
     'lock.device': set(),
     'diagnostic.join': {'first', 'second'},
@@ -2057,6 +2068,7 @@ def parse_args() -> argparse.Namespace:
     operations.add_argument('--from-run', metavar='RUN_ID', help=bundle.render('help.from_run'))
     operations.add_argument('--restore-run', metavar='RUN_ID', help=bundle.render('help.restore_run'))
     operations.add_argument('--list-runs', action='store_true', help=bundle.render('help.list_runs'))
+    operations.add_argument('--verify-run', metavar='RUN_ID', help=bundle.render('help.verify_run'))
     operations.add_argument('--cleanup', action='store_true', help=bundle.render('help.cleanup'))
     parser.add_argument('--keep-successful', type=int, default=2, help=bundle.render('help.keep_successful'))
     parser.add_argument('--delete-run', action='append', default=[], metavar='RUN_ID', help=bundle.render('help.delete_run'))
@@ -2070,6 +2082,10 @@ def parse_args() -> argparse.Namespace:
     if args.restore_run and (args.source_model or args.target_model or args.mode or args.books is not None or args.fonts is not None or args.conflict
                             or args.include_dir or args.exclude_dir or args.extra_extension or not args.reading_data):
         parser.error(bundle.render('argument.restore_settings'))
+    if args.verify_run and (args.dry_run or args.mode or args.self_test or args.books is not None or args.fonts is not None
+            or args.source_model or args.target_model or args.conflict or args.include_dir or args.exclude_dir
+            or args.extra_extension or not args.reading_data or args.delete_run):
+        parser.error(bundle.render('argument.verify_settings'))
     args.locale = bundle.tag
     args.locale_bundle = bundle
     if (args.preview_ui or args.list_locales) and (args.mode or args.self_test or args.books is not None or args.fonts is not None
@@ -2293,6 +2309,77 @@ def load_artifact(run: Path, entry: Optional[dict], kind: str):
     manifest = read_json(saved_file(run, entry['manifest']))
     verify_saved_archive(archive, manifest, kind)
     return archive, manifest
+
+
+def verify_run_artifacts(run: Path) -> List[dict]:
+    """Read-only check of every archive/manifest pair in one batch; never repairs or rewrites."""
+    entries = list(run.iterdir())
+    if any(p.is_symlink() for p in entries):
+        raise MigrationError(message('error.verify_symlink'))
+    archives = {p.name[:-len('.zip')]: p for p in entries if p.is_file() and p.name.endswith('.zip')}
+    manifests = {p.name[:-len('.manifest.json')]: p for p in entries
+                 if p.is_file() and p.name.endswith('.manifest.json')}
+    results = []
+    for name in ('source-snapshot.json', 'target-snapshot.json'):
+        if not (run / name).exists():
+            continue
+        try:
+            descriptor = read_json(run / name)
+        except MigrationError as exc:
+            results.append({'name': name, 'kind': 'descriptor', 'status': 'failed', 'detail': exception_detail(exc)})
+            continue
+        for key in ('koreader', 'payload'):
+            entry = descriptor.get(key)
+            for field in ('archive', 'manifest') if isinstance(entry, dict) else ():
+                if not (run / str(entry.get(field))).is_file():
+                    results.append({'name': name, 'kind': 'descriptor', 'status': 'failed',
+                                    'detail': message('error.verify_referenced_missing', name=entry.get(field))})
+    for stem in sorted(set(archives) | set(manifests)):
+        label = stem + '.zip'
+        kind = None
+        try:
+            if stem not in archives or stem not in manifests:
+                raise MigrationError(message('error.verify_unpaired'))
+            manifest = read_json(manifests[stem])
+            if 'archive_sha256' in manifest:
+                kind = 'payload'
+            elif isinstance(manifest.get('archive'), dict):
+                kind = 'koreader'
+                if manifest['archive'].get('filename', label) != label:
+                    raise MigrationError(message('error.verify_archive_name', name=manifest['archive'].get('filename')))
+            else:
+                raise MigrationError(message('error.verify_manifest_kind'))
+            try:
+                verify_saved_archive(archives[stem], manifest, kind)
+            except (zipfile.BadZipFile, OSError) as exc:
+                raise MigrationError(message('error.verify_unreadable', detail=str(exc))) from exc
+            results.append({'name': label, 'kind': kind, 'status': 'verified'})
+        except MigrationError as exc:
+            results.append({'name': label, 'kind': kind, 'status': 'failed', 'detail': exception_detail(exc)})
+    return results
+
+
+def verify_run_command(project: Path, reference: str) -> int:
+    run = resolve_saved_run(project, reference)
+    ui_emit('verify.heading', run_id=run.name)
+    try:
+        status = read_json(run / 'run.json').get('status') if (run / 'run.json').is_file() else None
+    except MigrationError:
+        status = None
+    if status == 'running':
+        ui_emit('verify.running', severity='warning')
+    results = verify_run_artifacts(run)
+    if not results:
+        ui_emit('verify.empty')
+    for result in results:
+        if result['status'] == 'verified':
+            ui_emit('verify.passed', name=result['name'], kind=result['kind'])
+        else:
+            ui_emit('verify.failed', name=result['name'], detail=result['detail'], severity='error')
+    failed = sum(r['status'] == 'failed' for r in results)
+    ui_emit('verify.summary', verified=len(results) - failed, failed=failed,
+            severity='error' if failed else 'info')
+    return 1 if failed else 0
 
 
 def artifact_entry(archive: Optional[Path]) -> Optional[dict]:
@@ -2558,6 +2645,8 @@ def run_main(args) -> int:
     if getattr(args, 'list_runs', False):
         print_catalog(run_catalog(project))
         return 0
+    if getattr(args, 'verify_run', None):
+        return verify_run_command(project, args.verify_run)
     if getattr(args, 'cleanup', False):
         return cleanup_command(project, args.keep_successful, [] if args.dry_run else args.delete_run)
     require_macos_tools()

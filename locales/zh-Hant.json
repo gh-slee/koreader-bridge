@@ -374,6 +374,20 @@
     "recovery.payload_error": "資料檔案：{detail}",
     "recovery.runtime_error": "KOReader：{detail}",
     "value.true": "是",
-    "value.false": "否"
+    "value.false": "否",
+    "help.verify_run": "依清單驗證單一已儲存批次的封存檔；唯讀，不需要連接 Kobo。",
+    "argument.verify_settings": "--verify-run 只會讀取已儲存的批次；只能搭配 --backup-dir 與 --locale 調整操作。",
+    "verify.heading": "備份驗證（唯讀）：{run_id}",
+    "verify.running": "此批次仍標示為執行中；其封存檔可能不完整。",
+    "verify.empty": "此批次中找不到封存檔或清單。",
+    "verify.passed": "驗證通過 [{kind}]：{name}",
+    "verify.failed": "驗證失敗 {name}：{detail}",
+    "verify.summary": "驗證完成：{verified} 個通過，{failed} 個失敗。未變更任何資料。",
+    "error.verify_symlink": "含有符號連結的已儲存批次無法驗證。",
+    "error.verify_unpaired": "封存檔與清單必須同時存在。",
+    "error.verify_referenced_missing": "快照參照的檔案遺失：{name}",
+    "error.verify_manifest_kind": "清單並非 KOReader 或書庫封存檔的清單。",
+    "error.verify_archive_name": "清單屬於另一個封存檔：{name}",
+    "error.verify_unreadable": "無法讀取封存檔：{detail}"
   }
 }

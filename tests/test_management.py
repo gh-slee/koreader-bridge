@@ -468,5 +468,73 @@ class LockAndCatalogTests(base.MigrationTestCase):
         self.assertEqual(base.tree_contents(project),before)
 
 
+
+class BackupVerificationTests(base.MigrationTestCase):
+    prepare_devices = base.WorkflowTests.prepare_devices
+    execute = ManagedWorkflowTests.execute
+    latest = ManagedWorkflowTests.latest
+    make_run = LockAndCatalogTests.make_run
+
+    def verify(self, project, run_id, *extra):
+        out=io.StringIO()
+        with mock.patch('sys.argv',['tool','--backup-dir',str(project),'--verify-run',run_id,*extra]), \
+             mock.patch.object(m,'require_macos_tools') as require, mock.patch('sys.stdout',out), mock.patch('sys.stderr',out):
+            code=m.main()
+        require.assert_not_called()
+        return code,out.getvalue()
+
+    def test_verify_run_checks_every_saved_archive_without_changes(self):
+        source,target=self.prepare_devices()
+        project=self.root/'project'
+        self.execute(project,[source,target],['--mode','full'])
+        run=self.latest(project)
+        results=m.verify_run_artifacts(run)
+        self.assertEqual({r['status'] for r in results},{'verified'})
+        self.assertEqual({r['kind'] for r in results},{'koreader','payload'})
+        self.assertTrue(any('-pre-migration-' in r['name'] for r in results))
+        before=base.tree_contents(project)
+        code,output=self.verify(project,run.name)
+        self.assertEqual(code,0)
+        self.assertIn(f'{len(results)} verified, 0 failed',output)
+        self.assertEqual(base.tree_contents(project),before)
+
+    def test_verify_run_reports_corrupt_unpaired_and_missing_references(self):
+        source,target=self.prepare_devices()
+        project=self.root/'project'
+        self.execute(project,[source,target],['--mode','full'])
+        run=self.latest(project)
+        payload=next(p for p in run.glob('library-*.zip') if '-pre-migration-' not in p.name)
+        payload.write_bytes(payload.read_bytes()[:-1]+b'X')
+        runtime=next(p for p in run.glob('koreader-*.zip') if '-pre-migration-' in p.name)
+        runtime.with_suffix('.manifest.json').unlink()
+        results={r['name']:r for r in m.verify_run_artifacts(run)}
+        self.assertEqual(results[payload.name]['status'],'failed')
+        self.assertEqual(results[runtime.name]['detail'].key,'error.verify_unpaired')
+        self.assertTrue(any(r['kind']=='descriptor' and r['detail'].key=='error.verify_referenced_missing'
+                            for r in results.values()))
+        code,output=self.verify(project,run.name,'--locale','zh-Hant')
+        self.assertEqual(code,1)
+        self.assertIn('驗證失敗',output)
+
+    def test_verify_run_rejects_symlinks_traversal_and_migration_settings(self):
+        project=self.root/'project'
+        run=self.make_run(project,'01')
+        (run/'link.zip').symlink_to(run/'archive.zip')
+        with self.assertRaises(m.MigrationError):
+            m.verify_run_artifacts(run)
+        with self.assertRaises(m.MigrationError):
+            m.verify_run_command(project,'../01')
+        with mock.patch('sys.argv',['tool','--verify-run','01','--mode','full']), \
+             mock.patch('sys.stderr',io.StringIO()), self.assertRaises(SystemExit):
+            m.parse_args()
+
+    def test_verify_run_reports_unreadable_archive_as_failure(self):
+        project=self.root/'project'
+        run=self.make_run(project,'01')
+        (run/'archive.manifest.json').write_text(json.dumps({'archive_sha256':m.sha256_file(run/'archive.zip'),'files':{}}))
+        [result]=m.verify_run_artifacts(run)
+        self.assertEqual((result['status'],result['detail'].key),('failed','error.verify_unreadable'))
+
+
 if __name__=='__main__':
     unittest.main(verbosity=2)

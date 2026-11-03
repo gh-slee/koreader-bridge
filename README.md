@@ -31,7 +31,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Desktop development source: `1.1.0-dev.3`.** The native app is a local development build, not a notarized download. The published 1.0.0 release contains the CLI only. Device migration supports Kobo → Kobo on macOS. KOREADER has scoped Libra 2 → Clara 2E hardware confirmation, including normal use and progress persistence. FULL/LIBRARY remain available with automated coverage; successful physical copying for those modes and broader manual review remain incomplete. See the [validation record](ACCEPTANCE.md#validation-record-2026-10-22) and [release scope](ACCEPTANCE.md#first-stable-release-gates). A version in source is not proof of publication: use the [release list](https://github.com/gh-slee/koreader-bridge/releases) for published assets.
+> **Desktop development source: `1.1.0-dev.4`.** The native app is a local development build, not a notarized download. The published 1.0.0 release contains the CLI only. Device migration supports Kobo → Kobo on macOS. KOREADER has scoped Libra 2 → Clara 2E hardware confirmation, including normal use and progress persistence. FULL/LIBRARY remain available with automated coverage; successful physical copying for those modes and broader manual review remain incomplete. See the [validation record](ACCEPTANCE.md#validation-record-2026-10-22) and [release scope](ACCEPTANCE.md#first-stable-release-gates). A version in source is not proof of publication: use the [release list](https://github.com/gh-slee/koreader-bridge/releases) for published assets.
 
 <a id="quick-start"></a>
 

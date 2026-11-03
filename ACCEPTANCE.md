@@ -253,6 +253,14 @@ Status: KM-014/KM-015/KM-016 Ready for test. Complete the implementation and run
 - Expect safe English bootstrap diagnostics when catalogs cannot load, original Python-generated argparse/traceback messages, technical tokens and raw external diagnostics. These are deliberate boundaries, not unreviewed translation gaps.
 - Finish the existing mode, difference, saved-source, exact-restore, cleanup-preview and package checklists using the final reviewed build. Record human results together and retain recovery backups until sign-off.
 
+## KM-010: standalone backup verification (1.1.0-dev.4)
+
+Status: Ready for test. No Kobo is required. Use a copy of an output root, or disposable synthetic runs, for any corruption cases.
+
+- Run `--verify-run <run-id>` on an existing successful FULL batch. Every archive, including `-pre-migration-` TARGET backups, should be reported as verified, exit status 0 and the batch should be unchanged.
+- On a disposable copy, alter one archive byte, remove one manifest and rename a referenced file. Each should be reported as failed with exit status 1.
+- Confirm the command refuses migration settings, symlinked batches and paths outside `runs/`, and that zh-Hant/zh-Hans output reads correctly.
+
 ## Native review and language acceptance (1.1.0-dev.3)
 
 KM-027/KM-028 are Ready for test. Use isolated sample readers first; physical-reader operations need their own explicit scope. Existing hardware records do not sign off this changed interface.
