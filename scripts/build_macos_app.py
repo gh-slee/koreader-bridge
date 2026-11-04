@@ -150,7 +150,7 @@ def build(output_root, runtime_archive=None):
     if not licenses:
         raise ValueError("Runtime license notices are missing.")
     metadata = {
-        "schema_version": 1, "app": "KOReader Bridge", "development_version": "1.1.0-dev.4",
+        "schema_version": 1, "app": "KOReader Bridge", "development_version": "1.1.0-dev.5",
         "architecture": "arm64", "minimum_macos": "14.0", "python": lock,
         "source_inputs": {name: sha(ROOT / name) for name in BACKEND_INPUTS + SWIFT_INPUTS + NATIVE_INPUTS},
         "signing": "ad-hoc local", "notarized": False, "runtime_license_files": len(licenses),

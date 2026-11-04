@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0-dev.5: reading-data conflict report
+
+- Add a read-only reading-data section to `difference.json` and `difference.txt` for FULL and LIBRARY runs, including previews, AUDIT and saved-source reuse. For each book it compares the progress, position, status and annotation counts in KOReader `metadata.<ext>.lua` sidecars and central `docsettings`/`hashdocsettings` stores, and reports which TARGET reading data or annotations the existing plan will replace.
+- Flag edition mismatches, different book files, metadata that may belong to another copy, possible renamed copies, ambiguous matches, several metadata locations and unreadable files. The report never merges reading data, picks a side, changes the copy plan or adds a prompt; problems are reported and never stop a migration.
+- Parse KOReader metadata with a strict, bounded Lua data-literal parser: tables, strings, numbers, booleans and nil only. Identifiers in value position, operators, calls and a second statement are rejected; nothing is evaluated. Annotation text, notes, titles and authors are not stored. KOReader partial-MD5 and central-store layouts are implemented from documented behavior and remain unverified on hardware.
+
 ## 1.1.0-dev.4: standalone backup verification
 
 - Add `--verify-run RUN_ID` to check every archive/manifest pair in one saved batch without a Kobo: archive SHA-256, member sizes/hashes, unsafe or duplicate paths, unlisted members, unpaired files and missing snapshot references. Verification is read-only, reports each artifact and exits 1 when any check fails.

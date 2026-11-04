@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 PROJECT_NAME = "KOReader Bridge"
-VERSION = "1.1.0-dev.4"
+VERSION = "1.1.0-dev.5"
 DEFAULT_BACKUP_DIR = Path(__file__).resolve().parent
 VOLUME_ROOT = Path("/Volumes")
 
@@ -714,6 +714,35 @@ UI_MESSAGE_FIELDS = {
     'recovery.runtime_error': {'detail'},
     'value.true': set(),
     'value.false': set(),
+    'reading_data.title': set(),
+    'reading_data.status': {'reason', 'status'},
+    'reading_data.summary': {'books', 'differs', 'same', 'source_only', 'target_only', 'unparseable'},
+    'reading_data.book_detail': {'source_annotations', 'source_progress', 'target_annotations', 'target_progress'},
+    'reading_data.more': {'count'},
+    'reading_data.value_unknown': set(),
+    'reading_data.warning_replaced': {'annotations', 'count'},
+    'reading_data.warning_edition': {'count'},
+    'reading_data.status_complete': set(),
+    'reading_data.status_partial': set(),
+    'reading_data.status_skipped': set(),
+    'reading_data.status_not_applicable': set(),
+    'reading_data.status_failed': set(),
+    'reading_data.reason_option_disabled': set(),
+    'reading_data.reason_mode_koreader': set(),
+    'reading_data.reason_no_books': set(),
+    'reading_data.reason_limit_exceeded': set(),
+    'reading_data.reason_internal_error': set(),
+    'reading_data.flag_edition_mismatch': set(),
+    'reading_data.flag_content_differs': set(),
+    'reading_data.flag_stale_sidecar_suspected': set(),
+    'reading_data.flag_moved_candidate': set(),
+    'reading_data.flag_ambiguous_match': set(),
+    'reading_data.flag_multiple_stores': set(),
+    'reading_data.flag_unparseable': set(),
+    'reading_data.flag_target_reading_data_replaced': set(),
+    'reading_data.flag_target_annotations_replaced': set(),
+    'reading_data.flag_target_kept': set(),
+    'reading_data.flag_retained_for_different_book': set(),
 }
 CURRENT_UI = ContextVar('kobo_migration_ui', default=None)
 
@@ -2015,6 +2044,14 @@ def self_test() -> None:
         assert canonical_model("Kobo Clara 2E") == MODEL_CLARA
         assert canonical_model("Kobo Libra 2") == MODEL_LIBRA
 
+        # Reading-data literals are parsed, never executed.
+        assert parse_lua_data(b'return {["a"] = {1, "x"}, b = true}') == {'a': {1: 1, 2: 'x'}, 'b': True}
+        try:
+            parse_lua_data(b'return os.execute("x")')
+            raise AssertionError('executable Lua accepted')
+        except LuaDataError as exc:
+            assert exc.code == 'executable_construct'
+
         source = root / "source"
         target = root / "target"
         (source / "Books").mkdir(parents=True)
@@ -2435,6 +2472,864 @@ def source_descriptor(run: Path) -> dict:
             'payload': artifact_entry(library[0].with_suffix('').with_suffix('.zip')) if library else None}
 
 
+# --- KOReader Lua data literals (KM-007; reused by KM-008/KM-009) -------------------------
+# Device Lua is parsed as a data literal only. It is never evaluated, compiled or executed.
+
+@dataclass(frozen=True)
+class LuaLimits:
+    max_bytes: int = 8 * 1024 * 1024
+    max_depth: int = 64
+    max_nodes: int = 1_000_000
+    max_seconds: float = 2.0
+
+
+class LuaDataError(ValueError):
+    """A rejected Lua data literal; `code` is a stable English machine token."""
+    def __init__(self, code: str, detail: str, offset: int = 0, line: int = 1):
+        super().__init__(f'{detail} (line {line}, byte {offset})')
+        self.code, self.offset, self.line = code, offset, line
+
+
+LUA_MAX_DEPTH_CEILING = 200
+LUA_WHITESPACE = b' \t\r\n\f\v'
+LUA_SIMPLE_ESCAPES = {ord('a'): 7, ord('b'): 8, ord('f'): 12, ord('n'): 10, ord('r'): 13,
+                      ord('t'): 9, ord('v'): 11, ord('\\'): 92, ord('"'): 34, ord("'"): 39}
+LUA_NAME_RE = re.compile(rb'[A-Za-z_][A-Za-z0-9_]*')
+LUA_DECIMAL_RE = re.compile(rb'(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?')
+LUA_HEX_RE = re.compile(rb'0[xX]([0-9A-Fa-f]+)')
+LUA_LONG_OPEN_RE = re.compile(rb'\[(=*)\[')
+LUA_NEWLINES_RE = re.compile(rb'\r\n|\n\r|\r')
+LUA_QUOTED_STOP = {ord('"'): re.compile(rb'[\\\r\n"]'), ord("'"): re.compile(rb"[\\\r\n']")}
+LUA_LITERAL_WORDS = {b'true', b'false', b'nil', b'return'}
+
+
+class _LuaDataParser:
+    def __init__(self, data: bytes, limits: LuaLimits, clock):
+        self.data, self.limits, self.clock = data, limits, clock
+        self.pos, self.nodes, self.ticks = 0, 0, 0
+        self.deadline = clock() + limits.max_seconds
+        self.peeked = None
+
+    def fail(self, code: str, detail: str, offset: Optional[int] = None):
+        offset = self.pos if offset is None else offset
+        raise LuaDataError(code, detail, offset, self.data.count(b'\n', 0, offset) + 1)
+
+    def skip_space(self) -> None:
+        data, n = self.data, len(self.data)
+        while self.pos < n:
+            byte = data[self.pos]
+            if byte in LUA_WHITESPACE:
+                self.pos += 1
+            elif data.startswith(b'--', self.pos):
+                start = self.pos
+                opener = LUA_LONG_OPEN_RE.match(data, self.pos + 2)
+                if opener:
+                    end = data.find(b']' + opener.group(1) + b']', opener.end())
+                    if end < 0:
+                        self.fail('unterminated_comment', 'Unterminated long comment.', start)
+                    self.pos = end + len(opener.group(1)) + 2
+                else:
+                    newline = data.find(b'\n', self.pos)
+                    self.pos = n if newline < 0 else newline + 1
+            else:
+                return
+
+    def next_token(self):
+        if self.peeked is not None:
+            token, self.peeked = self.peeked, None
+            return token
+        self.ticks += 1
+        if self.ticks % 4096 == 0 and self.clock() > self.deadline:
+            self.fail('timeout', 'Parsing exceeded the time limit.')
+        self.skip_space()
+        data, start = self.data, self.pos
+        if start >= len(data):
+            return ('eof', None, start)
+        byte = data[start]
+        if byte in b'{}]=,;':
+            self.pos += 1
+            return (chr(byte), None, start)
+        if byte == ord('['):
+            opener = LUA_LONG_OPEN_RE.match(data, start)
+            if opener:
+                return ('str', self.long_string(opener), start)
+            self.pos += 1
+            return ('[', None, start)
+        if byte in LUA_QUOTED_STOP:
+            return ('str', self.quoted_string(byte), start)
+        if byte == ord('-') or byte == ord('.') or 48 <= byte <= 57:
+            return ('num', self.number(), start)
+        name = LUA_NAME_RE.match(data, start)
+        if name:
+            self.pos = name.end()
+            word = name.group()
+            if word in LUA_LITERAL_WORDS:
+                return (word.decode('ascii'), None, start)
+            return ('name', word.decode('ascii'), start)
+        if 33 <= byte <= 126:
+            self.fail('executable_construct', f'Operator or call syntax {chr(byte)!r} is not data.', start)
+        self.fail('syntax', f'Unexpected byte 0x{byte:02x}.', start)
+
+    def peek(self):
+        if self.peeked is None:
+            self.peeked = self.next_token()
+        return self.peeked
+
+    def number(self):
+        data, start = self.data, self.pos
+        negative = data[start] == ord('-')
+        body = start + 1 if negative else start
+        if negative and not (body < len(data) and (48 <= data[body] <= 57 or data[body] == ord('.'))):
+            self.fail('executable_construct', 'Unary minus is only accepted before a numeric literal.', start)
+        hexadecimal = LUA_HEX_RE.match(data, body)
+        if hexadecimal:
+            end, value = hexadecimal.end(), int(hexadecimal.group(1), 16)
+        else:
+            if data.startswith((b'0x', b'0X'), body):
+                self.fail('invalid_number', 'Hexadecimal literal has no digits.', start)
+            decimal = LUA_DECIMAL_RE.match(data, body)
+            if not decimal or decimal.group() == b'.':
+                self.fail('executable_construct', 'A dot outside a number is not data.', start)
+            end, text = decimal.end(), decimal.group()
+            value = float(text) if any(c in text for c in b'.eE') else int(text)
+            if isinstance(value, float) and value in (float('inf'), float('-inf')):
+                self.fail('invalid_number', 'Non-finite numbers are not accepted.', start)
+        if end < len(data) and (data[end:end + 1].isalnum() or data[end] in b'_.'):
+            self.fail('invalid_number', 'Malformed numeric literal.', start)
+        self.pos = end
+        return -value if negative else value
+
+    def quoted_string(self, quote: int) -> str:
+        data, start = self.data, self.pos
+        stop, pos, out = LUA_QUOTED_STOP[quote], start + 1, bytearray()
+        while True:
+            found = stop.search(data, pos)
+            if not found:
+                self.fail('unterminated_string', 'Unterminated string.', start)
+            out += data[pos:found.start()]
+            pos, byte = found.start() + 1, data[found.start()]
+            if byte == quote:
+                self.pos = pos
+                return out.decode('utf-8', 'surrogateescape')
+            if byte in b'\r\n':
+                self.fail('unterminated_string', 'Unescaped newline in string.', start)
+            if pos >= len(data):
+                self.fail('unterminated_string', 'Unterminated string.', start)
+            code = data[pos]
+            if code in LUA_SIMPLE_ESCAPES:
+                out.append(LUA_SIMPLE_ESCAPES[code])
+                pos += 1
+            elif code in b'\r\n':
+                pos += 2 if data[pos + 1:pos + 2] in (b'\r', b'\n') and data[pos + 1] != code else 1
+                out.append(10)
+            elif 48 <= code <= 57:
+                digits = re.match(rb'[0-9]{1,3}', data[pos:pos + 3]).group()
+                if int(digits) > 255:
+                    self.fail('bad_escape', 'Decimal escape is larger than 255.', pos - 1)
+                out.append(int(digits))
+                pos += len(digits)
+            elif code == ord('x'):
+                digits = data[pos + 1:pos + 3]
+                if not re.fullmatch(rb'[0-9A-Fa-f]{2}', digits):
+                    self.fail('bad_escape', 'Hexadecimal escape needs two digits.', pos - 1)
+                out.append(int(digits, 16))
+                pos += 3
+            elif code == ord('z'):
+                pos += 1
+                while pos < len(data) and data[pos] in LUA_WHITESPACE:
+                    pos += 1
+            elif code == ord('u'):
+                escape = re.match(rb'u\{([0-9A-Fa-f]{1,8})\}', data[pos:pos + 11])
+                point = int(escape.group(1), 16) if escape else -1
+                if not 0 <= point <= 0x10FFFF or 0xD800 <= point <= 0xDFFF:
+                    self.fail('bad_escape', 'Invalid Unicode escape.', pos - 1)
+                out += chr(point).encode('utf-8')
+                pos += len(escape.group())
+            else:
+                self.fail('bad_escape', f'Unknown escape \\{chr(code)!r}.', pos - 1)
+
+    def long_string(self, opener) -> str:
+        start, closing = opener.start(), b']' + opener.group(1) + b']'
+        end = self.data.find(closing, opener.end())
+        if end < 0:
+            self.fail('unterminated_string', 'Unterminated long string.', start)
+        body = self.data[opener.end():end]
+        for newline in (b'\r\n', b'\n\r', b'\n', b'\r'):
+            if body.startswith(newline):
+                body = body[len(newline):]
+                break
+        self.pos = end + len(closing)
+        return LUA_NEWLINES_RE.sub(b'\n', body).decode('utf-8', 'surrogateescape')
+
+    def expect(self, kind: str) -> None:
+        token = self.next_token()
+        if token[0] != kind:
+            code = 'executable_construct' if token[0] == 'name' else 'syntax'
+            self.fail(code, f'Expected {kind!r}, found {token[0]!r}.', token[2])
+
+    def count_node(self) -> None:
+        self.nodes += 1
+        if self.nodes > self.limits.max_nodes:
+            self.fail('too_many_nodes', 'Too many values.')
+
+    def value(self, depth: int):
+        kind, value, start = self.next_token()
+        self.count_node()
+        if kind in {'str', 'num'}:
+            return value
+        if kind in {'true', 'false'}:
+            return kind == 'true'
+        if kind == 'nil':
+            return None
+        if kind == '{':
+            return self.table(depth + 1, start)
+        if kind == 'name':
+            self.fail('executable_construct', f'Identifier {value!r} is not a data value.', start)
+        self.fail('syntax', f'Expected a value, found {kind!r}.', start)
+
+    def key(self):
+        kind, value, start = self.next_token()
+        if kind == 'str':
+            return value
+        if kind == 'num':
+            return int(value) if isinstance(value, float) and value.is_integer() else value
+        self.fail('invalid_key', f'Unsupported table key {kind!r}.', start)
+
+    def table(self, depth: int, start: int) -> dict:
+        if depth > self.limits.max_depth:
+            self.fail('too_deep', 'Tables are nested too deeply.', start)
+        result, seen, index = {}, set(), 1
+        while True:
+            kind, value, offset = self.peek()
+            if kind == '}':
+                self.next_token()
+                return result
+            if kind == '[':
+                self.next_token()
+                key = self.key()
+                self.expect(']')
+                self.expect('=')
+            elif kind == 'name':
+                self.next_token()
+                if self.peek()[0] != '=':
+                    self.fail('executable_construct', f'Identifier {value!r} is not a data value.', offset)
+                self.next_token()
+                key = value
+            else:
+                key, index = index, index + 1
+            if key in seen:
+                self.fail('duplicate_key', f'Duplicate table key {key!r}.', offset)
+            seen.add(key)
+            item = self.value(depth)
+            if item is not None:
+                result[key] = item
+            separator = self.peek()[0]
+            if separator in {',', ';'}:
+                self.next_token()
+            elif separator != '}':
+                code = 'executable_construct' if separator == 'name' else 'syntax'
+                self.fail(code, f'Expected a separator or closing brace, found {separator!r}.', self.peek()[2])
+
+    def chunk(self):
+        if self.data.startswith(b'\xef\xbb\xbf'):
+            self.pos = 3
+        kind, _, start = self.next_token()
+        if kind != 'return':
+            self.fail('missing_return', 'The file must contain one return statement.', start)
+        result = self.value(0)
+        if self.peek()[0] == ';':
+            self.next_token()
+        kind, _, start = self.next_token()
+        if kind != 'eof':
+            self.fail('trailing_data', 'Unexpected content after the returned value.', start)
+        return result
+
+
+def parse_lua_data(data: bytes, limits: LuaLimits = LuaLimits(), clock=time.monotonic):
+    """Parse one `return <literal>` chunk. Tables become dicts; nothing is evaluated."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError('Lua data must be bytes.')
+    if len(data) > limits.max_bytes:
+        raise LuaDataError('too_large', 'Input exceeds the size limit.', limits.max_bytes)
+    if not 1 <= limits.max_depth <= LUA_MAX_DEPTH_CEILING:
+        raise ValueError('Unsupported Lua depth limit.')
+    return _LuaDataParser(bytes(data), limits, clock).chunk()
+
+
+def lua_sequence(table) -> Optional[list]:
+    """Return the values of a table whose keys are exactly 1..n, else None."""
+    if not isinstance(table, dict):
+        return None
+    keys = [key for key in table if type(key) is int]
+    if len(keys) != len(table) or sorted(keys) != list(range(1, len(table) + 1)):
+        return None
+    return [table[key] for key in range(1, len(table) + 1)]
+
+
+# --- Reading-data conflict report (KM-007) -------------------------------------------------
+# Read-only. It explains the existing plan and never changes it, merges or picks a side.
+
+READING_DATA_SCHEMA = 1
+READING_LIMITS = LuaLimits()
+READING_MAX_STORES = 50_000
+READING_MAX_TOTAL_BYTES = 512 * 1024 * 1024
+READING_MAX_SECONDS = 120.0
+READING_PROGRESS_TOLERANCE = 0.0005
+READING_MTIME_TOLERANCE = 2.0
+READING_XPOINTER_CHARS = 512
+READING_MAX_CANDIDATES = 10
+READING_TEXT_BOOKS = 500
+READING_STATUSES = {'reading', 'complete', 'abandoned'}
+READING_LOCATIONS = ('sidecar', 'docsettings', 'hashdocsettings')
+READING_MODE_LOCATION = {'doc': 'sidecar', 'dir': 'docsettings', 'hash': 'hashdocsettings'}
+READING_FLAGS = ('edition_mismatch', 'content_differs', 'stale_sidecar_suspected', 'moved_candidate',
+                 'ambiguous_match', 'multiple_stores', 'unparseable', 'target_reading_data_replaced',
+                 'target_annotations_replaced', 'target_kept', 'retained_for_different_book')
+MD5_HEX_RE = re.compile(r'[0-9a-fA-F]{32}\Z')
+DATE_RE = re.compile(r'[0-9]{4}-[0-9]{2}-[0-9]{2}\Z')
+
+
+def koreader_partial_md5(handle) -> str:
+    """KOReader util.partialMD5: 1 KiB samples at 0 and 1024 << 2i (i = 0..10). Unverified on hardware."""
+    digest = hashlib.md5(usedforsecurity=False)
+    for i in range(-1, 11):
+        handle.seek(0 if i < 0 else 1024 << (2 * i))
+        sample = handle.read(1024)
+        if not sample:
+            break
+        digest.update(sample)
+    return digest.hexdigest()
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def summarize_reading_data(table) -> dict:
+    """Extract bounded, non-personal fields from one parsed metadata.<ext>.lua table."""
+    invalid, fields = [], {}
+
+    def take(name, valid, convert=lambda value: value):
+        if name not in table:
+            return None
+        value = table[name]
+        if not valid(value):
+            invalid.append(name)
+            return None
+        return convert(value)
+
+    fields['percent_finished'] = take('percent_finished', lambda v: _is_number(v) and 0 <= v <= 1, float)
+    xpointer = take('last_xpointer', lambda v: isinstance(v, str))
+    page = take('last_page', lambda v: _is_number(v) and v >= 0 and float(v).is_integer(), int)
+    fields['position_kind'] = 'xpointer' if xpointer is not None else 'page' if page is not None else 'none'
+    fields['last_page'] = page
+    fields['last_xpointer'] = None if xpointer is None else xpointer[:READING_XPOINTER_CHARS]
+    fields['doc_pages'] = take('doc_pages', lambda v: _is_number(v) and v >= 0 and float(v).is_integer(), int)
+    summary = take('summary', lambda v: isinstance(v, dict)) or {}
+    status = summary.get('status')
+    fields['summary_status'] = (status if status in READING_STATUSES else 'other') if isinstance(status, str) else None
+    modified = summary.get('modified')
+    fields['summary_modified'] = modified if isinstance(modified, str) and DATE_RE.match(modified) else None
+    if 'modified' in summary and fields['summary_modified'] is None:
+        invalid.append('summary.modified')
+    checksum = take('partial_md5_checksum', lambda v: isinstance(v, str) and bool(MD5_HEX_RE.match(v)), str.lower)
+    fields['partial_md5_checksum'] = checksum
+    props = table.get('doc_props') if isinstance(table.get('doc_props'), dict) else {}
+    identity = tuple(props.get(name) if isinstance(props.get(name), str) else None for name in ('title', 'authors'))
+    annotations = lua_sequence(table['annotations']) if isinstance(table.get('annotations'), dict) else None
+    if 'annotations' in table and annotations is None:
+        invalid.append('annotations')
+    highlight = table.get('highlight') if isinstance(table.get('highlight'), dict) else None
+    bookmarks = lua_sequence(table['bookmarks']) if isinstance(table.get('bookmarks'), dict) else None
+    latest = []
+    counts = None
+    if annotations is not None:
+        items = [item for item in annotations if isinstance(item, dict)]
+        marked = [item for item in items if 'pos0' in item or 'drawer' in item]
+        counts = {'annotations': len(annotations), 'highlights': len(marked),
+                  'bookmarks': len(items) - len(marked),
+                  'notes': sum(1 for item in items if isinstance(item.get('note'), str) and item['note'].strip())}
+        latest = [item.get(name) for item in items for name in ('datetime_updated', 'datetime')]
+    elif highlight is not None or bookmarks is not None:
+        pages = [lua_sequence(items) or [] for items in (highlight or {}).values()]
+        marks = [item for item in bookmarks or [] if isinstance(item, dict)]
+        counts = {'annotations': None, 'highlights': sum(len(items) for items in pages),
+                  'bookmarks': len(bookmarks or []),
+                  'notes': sum(1 for item in marks if isinstance(item.get('text'), str) and item['text'].strip())}
+        latest = [item.get('datetime') for items in pages for item in items if isinstance(item, dict)]
+        latest += [item.get('datetime') for item in marks]
+    legacy = highlight is not None or bookmarks is not None
+    fields['schema_family'] = ('mixed' if annotations is not None and legacy else 'annotations'
+                               if annotations is not None else 'legacy' if legacy else 'none')
+    fields['counts'] = counts
+    stamps = [value for value in latest if isinstance(value, str) and len(value) <= 32]
+    fields['latest_annotation'] = max(stamps) if stamps else None
+    fields['invalid_fields'] = sorted(set(invalid))
+    return {'fields': fields, 'identity': identity if any(identity) else None}
+
+
+class _ReadingBudget:
+    def __init__(self, clock=time.monotonic):
+        self.clock, self.deadline = clock, clock() + READING_MAX_SECONDS
+        self.stores = self.bytes = 0
+        self.exhausted = False
+
+    def allow(self, size: int) -> bool:
+        if (self.exhausted or self.stores >= READING_MAX_STORES
+                or self.bytes + size > READING_MAX_TOTAL_BYTES or self.clock() > self.deadline):
+            self.exhausted = True
+            return False
+        self.stores, self.bytes = self.stores + 1, self.bytes + size
+        return True
+
+
+class _MountReadingSide:
+    """Read-only access to one mounted device; path safety follows checked_path."""
+    def __init__(self, mount: Path, hashes: Optional[dict] = None):
+        self.mount, self.hashes = mount, hashes or {}
+
+    def path(self, rel: str) -> Path:
+        return checked_path(self.mount, rel, allow_metadata=rel.startswith('.adds/koreader/'))
+
+    def info(self, rel: str):
+        path = self.path(rel)
+        if path.is_symlink() or not path.is_file():
+            return None
+        status = path.stat()
+        return {'size': status.st_size,
+                'mtime': datetime.fromtimestamp(status.st_mtime, timezone.utc).isoformat(timespec='seconds'),
+                'mtime_epoch': status.st_mtime}
+
+    def read(self, rel: str, size: int) -> bytes:
+        with self.path(rel).open('rb') as handle:
+            return handle.read(size + 1)
+
+    def partial_md5(self, rel: str) -> str:
+        with self.path(rel).open('rb') as handle:
+            return koreader_partial_md5(handle)
+
+    def has_prefix(self, prefix: str) -> bool:
+        try:
+            path = self.path(prefix.rstrip('/'))
+            return path.is_dir() and not path.is_symlink() and any(True for _ in path.iterdir())
+        except (MigrationError, OSError):
+            return False
+
+
+class _ArchiveReadingSide:
+    """Read-only access to verified saved-source ZIPs; ZIP mtimes are not device mtimes."""
+    def __init__(self, stack: ExitStack, payload_zip=None, payload_files=None, runtime_zip=None, runtime_files=None):
+        self.members, self.hashes = {}, {}
+        if payload_zip is not None:
+            archive = stack.enter_context(zipfile.ZipFile(payload_zip))
+            for rel, meta in (payload_files or {}).items():
+                self.members[rel] = (archive, rel, meta['size'])
+                self.hashes[rel] = meta.get('sha256')
+        if runtime_zip is not None:
+            archive = stack.enter_context(zipfile.ZipFile(runtime_zip))
+            for rel, meta in (runtime_files or {}).items():
+                if rel.startswith(('docsettings/', 'hashdocsettings/')):
+                    self.members['.adds/koreader/' + rel] = (archive, 'koreader/' + rel, meta['size'])
+                    self.hashes['.adds/koreader/' + rel] = meta.get('sha256')
+
+    def info(self, rel: str):
+        member = self.members.get(rel)
+        return None if member is None else {'size': member[2], 'mtime': None, 'mtime_epoch': None}
+
+    def read(self, rel: str, size: int) -> bytes:
+        archive, name, _ = self.members[rel]
+        with archive.open(name) as handle:
+            return handle.read(size + 1)
+
+    def partial_md5(self, rel: str) -> str:
+        archive, name, _ = self.members[rel]
+        with archive.open(name) as handle:
+            return koreader_partial_md5(handle)
+
+    def has_prefix(self, prefix: str) -> bool:
+        return any(rel.startswith(prefix) for rel in self.members)
+
+
+def reading_store_paths(book: str, partial_md5: Optional[str] = None) -> List[Tuple[str, str]]:
+    """Candidate metadata locations for one device-relative book path (assumptions A4/A5)."""
+    sdr = Path(book).with_suffix('.sdr').as_posix()
+    name = f'metadata.{Path(book).suffix.lower().lstrip(".")}.lua'
+    paths = [('sidecar', f'{sdr}/{name}'),
+             ('docsettings', f'.adds/koreader/docsettings/mnt/onboard/{sdr}/{name}')]
+    if partial_md5:
+        paths.append(('hashdocsettings', f'.adds/koreader/hashdocsettings/{partial_md5[:2]}/{partial_md5}.sdr/{name}'))
+    return paths
+
+
+def collect_reading_side(side, books: Dict[str, int], central: bool, budget: _ReadingBudget) -> dict:
+    """Parse every metadata store that maps to one of `books`; never raises for per-file problems."""
+    result = {'books': {}, 'limited': False}
+    hashed = central and side.has_prefix('.adds/koreader/hashdocsettings/')
+
+    def locate(location, rel):
+        try:
+            info = side.info(rel)
+        except (MigrationError, OSError) as exc:
+            return {'location': location, 'path': rel,
+                    'parse_status': 'unsafe_path' if isinstance(exc, MigrationError) else 'unreadable'}
+        return None if info is None else {'location': location, 'path': rel, **info}
+
+    def book_md5(rel):
+        try:
+            return side.partial_md5(rel)
+        except (MigrationError, OSError, KeyError, zipfile.BadZipFile):
+            return None
+
+    for book in sorted(books, key=path_key):
+        record = {'size': books[book], 'partial_md5': None, 'stores': []}
+        found = [store for store in (locate(location, rel) for location, rel in reading_store_paths(book)
+                                     if central or location == 'sidecar') if store]
+        if (found or hashed) and budget.allow(0):
+            record['partial_md5'] = book_md5(book)
+        if hashed and record['partial_md5']:
+            store = locate(*reading_store_paths(book, record['partial_md5'])[2])
+            found += [store] if store else []
+        for store in found:
+            if 'parse_status' not in store:
+                store.update(read_reading_store(side, store, budget))
+                result['limited'] = result['limited'] or store['parse_status'] == 'skipped_limit'
+            old = locate(store['location'], store['path'] + '.old')
+            store['old_backup'] = bool(old and 'parse_status' not in old)
+            record['stores'].append(store)
+        if record['stores']:
+            result['books'][book] = record
+    return result
+
+
+def read_reading_store(side, store: dict, budget: _ReadingBudget) -> dict:
+    size = store.get('size', 0)
+    if size > READING_LIMITS.max_bytes:
+        return {'parse_status': 'too_large'}
+    if not budget.allow(size):
+        return {'parse_status': 'skipped_limit'}
+    try:
+        data = side.read(store['path'], READING_LIMITS.max_bytes)
+    except (MigrationError, OSError, KeyError, zipfile.BadZipFile):
+        return {'parse_status': 'unreadable'}
+    digest = hashlib.sha256(data).hexdigest()
+    expected = side.hashes.get(store['path'])
+    if expected and expected != digest:
+        return {'parse_status': 'changed', 'sha256': digest}
+    try:
+        table = parse_lua_data(data, READING_LIMITS)
+    except LuaDataError as exc:
+        return {'parse_status': exc.code, 'parse_error': {'line': exc.line, 'byte': exc.offset}, 'sha256': digest}
+    if not isinstance(table, dict):
+        return {'parse_status': 'not_table', 'sha256': digest}
+    return {'parse_status': 'ok', 'sha256': digest, **summarize_reading_data(table)}
+
+
+def reading_mode_location(metadata_mode) -> str:
+    mode = str(metadata_mode or '').split(' ')[0]
+    return READING_MODE_LOCATION.get(mode, 'sidecar')
+
+
+def _primary_store(record: Optional[dict], preferred: str) -> Optional[dict]:
+    stores = [store for store in (record or {}).get('stores', []) if store.get('parse_status') == 'ok']
+    order = [preferred] + [location for location in READING_LOCATIONS if location != preferred]
+    stores.sort(key=lambda store: order.index(store['location']))
+    return stores[0] if stores else None
+
+
+def _has_reading(store: dict) -> bool:
+    fields = store.get('fields') or {}
+    counts = fields.get('counts') or {}
+    return (fields.get('percent_finished') is not None or fields.get('position_kind', 'none') != 'none'
+            or any(value for value in counts.values()))
+
+
+def _has_annotations(store: dict) -> bool:
+    counts = (store.get('fields') or {}).get('counts') or {}
+    return any(counts.get(name) for name in ('annotations', 'highlights', 'bookmarks', 'notes'))
+
+
+def _newer_hint(source: dict, target: dict) -> dict:
+    for basis in ('latest_annotation', 'summary_modified', 'mtime_epoch'):
+        left = source.get(basis) if basis == 'mtime_epoch' else source['fields'].get(basis)
+        right = target.get(basis) if basis == 'mtime_epoch' else target['fields'].get(basis)
+        if left is None or right is None:
+            continue
+        if basis == 'mtime_epoch' and abs(left - right) <= READING_MTIME_TOLERANCE:
+            continue
+        if left != right:
+            return {'side': 'source' if left > right else 'target',
+                    'basis': 'file_mtime' if basis == 'mtime_epoch' else basis}
+    return {'side': 'unknown', 'basis': None}
+
+
+def compare_reading_stores(source: dict, target: dict) -> dict:
+    left, right = source['fields'], target['fields']
+    if left['percent_finished'] is None or right['percent_finished'] is None:
+        progress, delta = 'unknown', None
+    else:
+        delta = round(left['percent_finished'] - right['percent_finished'], 6)
+        progress = 'same' if abs(delta) < READING_PROGRESS_TOLERANCE else 'differs'
+    if 'none' in (left['position_kind'], right['position_kind']):
+        position = 'unknown'
+    elif left['position_kind'] != right['position_kind']:
+        position = 'incomparable'
+    else:
+        key = 'last_xpointer' if left['position_kind'] == 'xpointer' else 'last_page'
+        position = 'same' if left[key] == right[key] else 'differs'
+
+    def verdict(a, b):
+        return 'unknown' if a is None or b is None else 'same' if a == b else 'differs'
+
+    # A side without any annotation table has no annotations; any on the other side differs.
+    annotations = verdict(left['counts'], right['counts'])
+    if annotations == 'unknown' and any(_has_annotations(store) for store in (source, target)):
+        annotations = 'differs'
+    return {'progress': progress, 'percent_delta': delta, 'position': position,
+            'status': verdict(left['summary_status'], right['summary_status']),
+            'annotations': annotations,
+            'doc_props': verdict(source.get('identity'), target.get('identity')),
+            'newer_hint': _newer_hint(source, target)}
+
+
+def _public_store(store: dict, action: str) -> dict:
+    keys = ('location', 'path', 'size', 'mtime', 'sha256', 'old_backup', 'parse_status')
+    result = {key: store.get(key) for key in keys}
+    if 'parse_error' in store:
+        result['parse_error'] = store['parse_error']
+    result['planned_action'] = action
+    if store.get('parse_status') == 'ok':
+        result['schema_family'] = store['fields']['schema_family']
+        result['fields'] = {key: value for key, value in store['fields'].items() if key != 'schema_family'}
+    return result
+
+
+def reading_data_skipped(status: str, reason: str) -> dict:
+    return {'schema_version': READING_DATA_SCHEMA, 'status': status, 'reason': reason, 'books': [],
+            'summary': {}, 'notes': ['Report only; reading data is never merged or chosen automatically.']}
+
+
+def build_reading_data_report(difference: dict, source_reading: dict, target_reading: dict, *,
+                              full: bool, source_mode, target_mode) -> dict:
+    """Compare per-book reading data against the existing plan; the plan is never changed."""
+    actions = {entry['path']: label for label, entries in difference['files'].items()
+               for entry in entries if label != 'target_only'}
+    target_only_books = {entry['path'] for entry in difference['files'].get('target_only', [])
+                         if entry.get('category') == 'books'}
+    source_books, target_books = source_reading['books'], target_reading['books']
+    source_pref, target_pref = reading_mode_location(source_mode), reading_mode_location(target_mode)
+    by_checksum = {}
+    for book, record in target_books.items():
+        if book in target_only_books:
+            for store in record['stores']:
+                checksum = (store.get('fields') or {}).get('partial_md5_checksum')
+                for value in {checksum, record.get('partial_md5')} - {None}:
+                    by_checksum.setdefault(value, set()).add(book)
+    flag_counts = dict.fromkeys(READING_FLAGS, 0)
+    summary = {'books': 0, 'both': 0, 'source_only': 0, 'target_only': 0, 'same': 0, 'differs': 0,
+               'unreadable_files': 0, **flag_counts}
+    books = []
+    for book in sorted(set(source_books) | set(target_books), key=path_key):
+        source, target = source_books.get(book), target_books.get(book)
+        planned = 'target_only' if book in target_only_books else actions.get(book, 'target_only')
+        content = {'identical': 'identical', 'new': 'source_only', 'target_only': 'target_only'}.get(planned, 'different')
+        flags = set()
+
+        def source_action(store):
+            if store['path'] in actions:
+                return actions[store['path']]
+            return 'via_runtime' if full and store['location'] != 'sidecar' else 'not_copied'
+
+        def target_action(store):
+            if store['path'] in actions:
+                return actions[store['path']]
+            return 'removed_by_runtime' if full and store['location'] != 'sidecar' else 'retained'
+
+        source_stores = [_public_store(store, source_action(store)) for store in (source or {}).get('stores', [])]
+        target_stores = [_public_store(store, target_action(store)) for store in (target or {}).get('stores', [])]
+        for raw, public in zip((target or {}).get('stores', []), target_stores):
+            if public['planned_action'] in {'overwrite', 'removed_by_runtime'} and raw.get('parse_status') == 'ok':
+                if _has_reading(raw):
+                    flags.add('target_reading_data_replaced')
+                if _has_annotations(raw):
+                    flags.add('target_annotations_replaced')
+            if public['planned_action'] == 'retained' and planned == 'overwrite':
+                flags.add('retained_for_different_book')
+        if any(store['planned_action'] in {'keep_target', 'metadata_skipped'} for store in source_stores):
+            flags.add('target_kept')
+        for side in (source_stores, target_stores):
+            if sum(store['parse_status'] == 'ok' for store in side) > 1:
+                flags.add('multiple_stores')
+            if any(store['parse_status'] != 'ok' for store in side):
+                flags.add('unparseable')
+        summary['unreadable_files'] += sum(store['parse_status'] != 'ok' for store in source_stores + target_stores)
+        left, right = _primary_store(source, source_pref), _primary_store(target, target_pref)
+        for record, store in ((source, left), (target, right)):
+            checksum = (store or {}).get('fields', {}).get('partial_md5_checksum')
+            if checksum and record.get('partial_md5') and checksum != record['partial_md5'] and store['location'] != 'hashdocsettings':
+                flags.add('stale_sidecar_suspected')
+        left_sum = (left or {}).get('fields', {}).get('partial_md5_checksum')
+        right_sum = (right or {}).get('fields', {}).get('partial_md5_checksum')
+        if left_sum and right_sum and left_sum != right_sum:
+            flags.add('edition_mismatch')
+        elif content == 'different' and source and target:
+            flags.add('content_differs')
+        match = {'method': 'path', 'confidence': 'exact' if source and target else 'unmatched', 'candidates': []}
+        if planned == 'new' and source:
+            keys = {(source or {}).get('partial_md5'), left_sum} - {None}
+            candidates = sorted({book_rel for key in keys for book_rel in by_checksum.get(key, ())
+                                 if target_books[book_rel]['size'] == source['size']}, key=path_key)
+            if candidates:
+                match = {'method': 'partial_md5', 'confidence': 'probable' if len(candidates) == 1 else 'ambiguous',
+                         'candidates': candidates[:READING_MAX_CANDIDATES]}
+                flags.add('moved_candidate' if len(candidates) == 1 else 'ambiguous_match')
+        comparison = compare_reading_stores(left, right) if left and right else None
+        summary['books'] += 1
+        summary['both' if source and target else 'source_only' if source else 'target_only'] += 1
+        if comparison:
+            same = all(comparison[key] in {'same', 'unknown'} for key in ('progress', 'position', 'status', 'annotations'))
+            summary['same' if same else 'differs'] += 1
+        for flag in flags:
+            summary[flag] += 1
+        books.append({'book': book, 'planned_action': planned, 'book_content': content, 'match': match,
+                      'source': {'book_partial_md5': (source or {}).get('partial_md5'), 'stores': source_stores},
+                      'target': {'book_partial_md5': (target or {}).get('partial_md5'), 'stores': target_stores},
+                      'comparison': comparison, 'flags': [flag for flag in READING_FLAGS if flag in flags]})
+    limited = source_reading.get('limited') or target_reading.get('limited')
+    return {'schema_version': READING_DATA_SCHEMA, 'status': 'partial' if limited else 'complete',
+            'reason': 'limit_exceeded' if limited else None,
+            'parser': {'grammar': 'lua-data-literal', 'version': 1, 'limits': asdict(READING_LIMITS)},
+            'assumptions': {'partial_md5': 'unverified', 'central_layout': 'unverified',
+                            'active_store': 'not_resolved'},
+            'metadata_mode': {'source': source_mode, 'target': target_mode},
+            'summary': summary, 'books': books,
+            'notes': ['Report only; reading data is never merged or chosen automatically.',
+                      'Comparison uses the store matching each device metadata mode first; '
+                      'it does not claim which store KOReader will open.']}
+
+
+def reading_data_targets(difference: dict, target: Path) -> Dict[str, int]:
+    """TARGET books worth inspecting: existing counterparts of SOURCE books plus target-only books."""
+    books = {}
+    for label, entries in difference['files'].items():
+        for entry in entries:
+            if entry.get('category') != 'books':
+                continue
+            if label == 'target_only':
+                books[entry['path']] = entry['size']
+            elif label != 'new':
+                try:
+                    path = payload_path(target, entry['path'])
+                    if path.is_file():
+                        books[entry['path']] = path.stat().st_size
+                except (MigrationError, OSError):
+                    continue
+    return books
+
+
+def source_reading_books(files: dict) -> Dict[str, int]:
+    return {rel: meta['size'] for rel, meta in files.items() if meta.get('category') == 'books'}
+
+
+def reading_data_applicability(mode: str, books: bool, reading_data: bool) -> Optional[dict]:
+    if mode == 'koreader':
+        return reading_data_skipped('not_applicable', 'mode_koreader')
+    if not books:
+        return reading_data_skipped('skipped', 'no_books')
+    if not reading_data:
+        return reading_data_skipped('skipped', 'option_disabled')
+    return None
+
+
+def capture_source_reading(side, files: dict, central: bool) -> dict:
+    """SOURCE half of the report, taken before eject; failures are reported, never raised."""
+    try:
+        return collect_reading_side(side, source_reading_books(files), central, _ReadingBudget())
+    except Exception as exc:  # Report only: never block migration on a reporter bug.
+        log_status(message('diagnostic.raw', detail=f'Reading data: SOURCE capture failed: {exc!r}'))
+        return {'failed': True, 'books': {}, 'limited': False}
+
+
+def reading_data_section(difference: dict, source_reading: Optional[dict], target: Path, *, mode: str,
+                         books: bool, reading_data: bool, central: bool, source_mode, target_mode) -> dict:
+    skipped = reading_data_applicability(mode, books, reading_data)
+    if skipped is not None:
+        return skipped
+    try:
+        if source_reading is None or source_reading.get('failed'):
+            raise RuntimeError('SOURCE reading data unavailable')
+        target_books = reading_data_targets(difference, target)
+        target_reading = collect_reading_side(_MountReadingSide(target), target_books, central, _ReadingBudget())
+        return build_reading_data_report(difference, source_reading, target_reading, full=mode == 'full',
+                                         source_mode=source_mode, target_mode=target_mode)
+    except Exception as exc:  # Report only: never block migration on a reporter bug.
+        log_status(message('diagnostic.raw', detail=f'Reading data report failed: {exc!r}'))
+        return reading_data_skipped('failed', 'internal_error')
+
+
+def emit_reading_data(section: dict) -> None:
+    if section['status'] not in {'complete', 'partial'}:
+        ui_emit('reading_data.status', status=message('reading_data.status_' + section['status']),
+                reason=message('reading_data.reason_' + section['reason']))
+        return
+    summary = section['summary']
+    ui_emit('reading_data.summary', books=summary['books'], same=summary['same'], differs=summary['differs'],
+            source_only=summary['source_only'], target_only=summary['target_only'], unparseable=summary['unreadable_files'])
+    if section['status'] == 'partial':
+        ui_emit('reading_data.status', status=message('reading_data.status_partial'),
+                reason=message('reading_data.reason_limit_exceeded'), severity='warning')
+    if summary['target_reading_data_replaced']:
+        ui_emit('reading_data.warning_replaced', count=summary['target_reading_data_replaced'],
+                annotations=summary['target_annotations_replaced'], severity='warning')
+    if summary['edition_mismatch'] or summary['content_differs']:
+        ui_emit('reading_data.warning_edition', count=summary['edition_mismatch'] + summary['content_differs'],
+                severity='warning')
+
+
+def reading_data_lines(section: dict) -> List[str]:
+    ui = current_ui()
+    lines = [ui.text(message('reading_data.title'))]
+    if section['status'] not in {'complete', 'partial'}:
+        lines.append(ui.text(message('reading_data.status', status=message('reading_data.status_' + section['status']),
+                                     reason=message('reading_data.reason_' + section['reason']))))
+        return lines + ['']
+    summary = section['summary']
+    lines.append(ui.text(message('reading_data.summary', books=summary['books'], same=summary['same'],
+                                 differs=summary['differs'], source_only=summary['source_only'],
+                                 target_only=summary['target_only'], unparseable=summary['unreadable_files'])))
+    if section['status'] == 'partial':
+        lines.append(ui.text(message('reading_data.status', status=message('reading_data.status_partial'),
+                                     reason=message('reading_data.reason_limit_exceeded'))))
+    unknown = ui.text(message('reading_data.value_unknown'))
+
+    def side_values(side):
+        store = next((s for s in side['stores'] if s.get('parse_status') == 'ok'), None)
+        if store is None:
+            return unknown, unknown
+        fields = store['fields']
+        percent = unknown if fields['percent_finished'] is None else f'{fields["percent_finished"] * 100:.1f}%'
+        counts = fields.get('counts') or {}
+        total = counts.get('annotations')
+        if total is None:
+            # No annotation table means no annotations; legacy files count highlights and bookmarks.
+            total = (counts.get('highlights') or 0) + (counts.get('bookmarks') or 0)
+        return percent, str(total)
+
+    shown = [book for book in section['books']
+             if book['flags'] or (book['comparison'] and any(book['comparison'][key] == 'differs'
+                                  for key in ('progress', 'position', 'status', 'annotations')))]
+    for book in shown[:READING_TEXT_BOOKS]:
+        source_progress, source_notes = side_values(book['source'])
+        target_progress, target_notes = side_values(book['target'])
+        lines.append('  ' + book['book'])
+        lines.append('    ' + ui.text(message('reading_data.book_detail', source_progress=source_progress,
+                                               target_progress=target_progress, source_annotations=source_notes,
+                                               target_annotations=target_notes)))
+        lines.extend('    - ' + ui.text(message('reading_data.flag_' + flag)) for flag in book['flags'])
+    if len(shown) > READING_TEXT_BOOKS:
+        lines.append(ui.text(message('reading_data.more', count=len(shown) - READING_TEXT_BOOKS)))
+    return lines + ['']
+
+
 def build_difference_report(target: Path, source_files: dict, plan: dict, books: bool, fonts: bool,
                             scan_options: dict) -> dict:
     categories = {'new': [], 'overwrite': [], 'identical': [], 'keep_target': [],
@@ -2488,6 +3383,8 @@ def write_difference(run: Path, difference: dict):
         lines.extend('  ' + entry['path'] for entry in entries)
         lines.append('')
         ui_emit('difference.section', label=category, count=summary['count'], size=human_bytes(summary['bytes']))
+    if 'reading_data' in difference:
+        lines.extend(reading_data_lines(difference['reading_data']))
     (run / 'difference.txt').write_text('\n'.join(lines), encoding='utf-8')
     ui_emit('difference.paths', path=run / 'difference.txt')
 
@@ -2776,10 +3673,20 @@ def migrate_saved_source(args, project: Path, run: Path, run_id: str, log_path: 
     ui_emit('saved_source.connect')
     if not prompt_yes_no(message('confirm.saved_source')):
         raise MigrationCancelled(message('cancel.migration'))
+    source_reading = None
+    if reading_data_applicability(mode, books, args.reading_data) is None:
+        scope = report.get('scan_options') or {}
+        with ExitStack() as stack:
+            side = _ArchiveReadingSide(stack, payload_zip, payload_manifest['files'],
+                                       source_zip if mode == 'full' else None,
+                                       (source_manifest or {}).get('files') if mode == 'full' else None)
+            source_reading = capture_source_reading(side, payload_manifest['files'],
+                                                    central=not (scope.get('include_dirs') or scope.get('exclude_dirs')))
     return migrate_target(args, run, run_id, log_path, mode, dry_run, mode in {'full', 'koreader'},
                           books, fonts, conflict, info, source_expected, target_expected, target_slug,
                           source_zip, source_manifest_path, source_manifest, payload_zip,
-                          payload_manifest, scanned, source_diag, report, report_path)
+                          payload_manifest, scanned, source_diag, report, report_path,
+                          source_reading=source_reading)
 
 
 def persist_target_changes(journal: dict):
@@ -3030,6 +3937,11 @@ def migrate(args, backup_dir: Path, run_id: str, log_path: Path) -> int:
             ui_emit('preview.archive_payload', path=payload_zip)
         else:
             payload_manifest = create_payload_archive(source_mount, scanned, payload_zip)
+    source_reading = None
+    if reading_data_applicability(mode, books, args.reading_data) is None:
+        hashes = {rel: meta.get('sha256') for rel, meta in payload_manifest['files'].items()}
+        source_reading = capture_source_reading(_MountReadingSide(source_mount, hashes), payload_manifest['files'],
+                                                central=not (args.include_dir or args.exclude_dir))
     if not dry_run:
         save_source_snapshot(backup_dir, source_info, mode, books, fonts, scan_report,
                              source_zip if full else None, payload_zip if scanned else None, confirmed_model=source_expected)
@@ -3040,13 +3952,13 @@ def migrate(args, backup_dir: Path, run_id: str, log_path: Path) -> int:
                           conflict, source_info, source_expected, target_expected, target_slug,
                           source_zip if full else None, source_manifest_path if full else None,
                           source_manifest, payload_zip if scanned else None, payload_manifest,
-                          scanned, source_diag, scan_report, report_path)
+                          scanned, source_diag, scan_report, report_path, source_reading=source_reading)
 
 
 def migrate_target(args, backup_dir, run_id, log_path, mode, dry_run, full, books, fonts,
                    conflict, source_info, source_expected, target_expected, target_slug,
                    source_zip, source_manifest_path, source_manifest, payload_zip,
-                   payload_manifest, scanned, source_diag, scan_report, report_path):
+                   payload_manifest, scanned, source_diag, scan_report, report_path, source_reading=None):
     ui_input(message('prompt.target'))
     target_mount = wait_for_single_kobo('TARGET')
     ensure_local_backup(backup_dir, target_mount.resolve())
@@ -3080,7 +3992,13 @@ def migrate_target(args, backup_dir, run_id, log_path, mode, dry_run, full, book
     if plan['metadata_skipped']:
         ui_emit('workflow.metadata_skipped', count=len(plan["metadata_skipped"]), severity="warning")
     difference = build_difference_report(target_mount, payload_manifest['files'], plan, books, fonts, scan_report.get('scan_options', {}))
+    scope = scan_report.get('scan_options', {})
+    difference['reading_data'] = reading_data_section(
+        difference, source_reading, target_mount, mode=mode, books=books, reading_data=args.reading_data,
+        central=not (scope.get('include_dirs') or scope.get('exclude_dirs')),
+        source_mode=source_diag.get('metadata_mode'), target_mode=target_diag.get('metadata_mode'))
     write_difference(backup_dir, difference)
+    emit_reading_data(difference['reading_data'])
     copy_size = sum(m['size'] for m in plan['copy'].values())
     if full:
         ensure_target_space(target_mount, source_info.total_bytes + copy_size, target_info.total_bytes)

@@ -253,6 +253,16 @@ Status: KM-014/KM-015/KM-016 Ready for test. Complete the implementation and run
 - Expect safe English bootstrap diagnostics when catalogs cannot load, original Python-generated argparse/traceback messages, technical tokens and raw external diagnostics. These are deliberate boundaries, not unreviewed translation gaps.
 - Finish the existing mode, difference, saved-source, exact-restore, cleanup-preview and package checklists using the final reviewed build. Record human results together and retain recovery backups until sign-off.
 
+## KM-007: reading-data conflict report (1.1.0-dev.5)
+
+Status: Ready for test. Start with LIBRARY or FULL previews (`--dry-run`); the report never writes to either reader. Physical-reader runs need their own explicit scope.
+
+- On a preview where both readers have the same book, read the Reading data block in `difference.txt`. Books whose progress or annotations differ should be listed with SOURCE/TARGET progress and annotation counts; identical books should appear only in the summary line.
+- For a book with highlights only on TARGET, confirm the `TARGET annotations will be replaced` flag and the console warning before the final prompt. With `--conflict keep-target`, the same book should instead show that SOURCE reading data will not be copied.
+- Compare one book's `partial_md5_checksum` in KOReader with the `book_partial_md5` recorded in `difference.json`. They should match; if not, record the KOReader version, because edition and stale-metadata flags depend on it.
+- If the reader uses `hashdocsettings` or `docsettings`, confirm those stores appear and that FULL marks TARGET central stores as `removed_by_runtime`.
+- Check that `difference.json` contains no annotation text, notes, titles or authors, and that zh-Hant/zh-Hans text reads correctly. KOREADER runs should report `not_applicable`.
+
 ## KM-010: standalone backup verification (1.1.0-dev.4)
 
 Status: Ready for test. No Kobo is required. Use a copy of an output root, or disposable synthetic runs, for any corruption cases.
