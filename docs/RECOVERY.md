@@ -47,6 +47,9 @@ Progress output includes phase timestamps, file counts, bytes, large-file transf
 
 `difference.txt` and `difference.json` enumerate new, overwritten, identical, kept, skipped-metadata and target-only files, with counts/bytes and book/sidecar grouping. Target-only entries are informative; default migration does not delete those books.
 
+<a id="reading-data-report"></a>
+From 1.1.0-dev.5, `difference.json` has an additive `reading_data` object (its own `schema_version` 1; the file's `schema_version` stays 1 and older runs simply lack it). `status` is `complete`, `partial` (size/time limit reached), `skipped`, `not_applicable` or `failed`, with a machine `reason`. Each entry in `books` names the book, its `planned_action` and `book_content`, the SOURCE and TARGET metadata stores with their `planned_action` and `parse_status`, a `comparison` of progress/position/status/annotations with a `newer_hint`, and `flags` such as `target_annotations_replaced`, `edition_mismatch` or `ambiguous_match`. Stores record counts, positions, statuses and checksums only, never annotation text, notes, titles or authors. The report is computed before any TARGET write and does not affect restore, `--verify-run` or cleanup; use the TARGET rollback backup to recover replaced reading data.
+
 `run.json` tracks phases and final states:
 
 | Status | Meaning |

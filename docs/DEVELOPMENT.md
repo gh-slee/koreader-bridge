@@ -196,6 +196,12 @@ Source-coverage regressions reject uncatalogued runtime exception/status sites a
 
 Editorial policy: preserve SOURCE/TARGET, mode/flag/status/category tokens and exact confirmation syntax; distinguish restoring a saved snapshot from automatic rollback and manual recovery. Review placeholders, negation, retained-versus-overwritten files and action timing in all three catalogs. Each language is maintained independently; script conversion alone is not an accepted review. Additional-language contribution guidance remains KM-017.
 
+## Reading-data report and Lua data literals (KM-007)
+
+`parse_lua_data()` accepts one `return <literal>` chunk: tables, quoted/long strings with Lua escapes, finite decimal/hex numbers, booleans and nil, plus comments and a UTF-8 BOM. Identifiers are allowed only as table keys before `=`; any other identifier, operator, call, `function`, label or second statement is rejected as `executable_construct`. Duplicate keys and boolean/table/nil keys are refused instead of guessing Lua semantics. Size, depth, value-count and time limits come from `LuaLimits`; errors are `LuaDataError` with an English machine `code`, line and byte offset. Tables become dicts; use `lua_sequence()` for 1..n arrays. KM-008/KM-009 should reuse this parser instead of regex over whole tables.
+
+The report reads SOURCE before eject (live) or from the verified ZIPs (saved-source), reads TARGET after planning and before backups or writes, and attaches `reading_data` to the difference report. It is wrapped so a reporter failure becomes `status: failed`; cancellation exceptions are not caught. Run limits are 50,000 stores, 512 MiB and 120 seconds. Version assumptions are explicit: unified `annotations` versus legacy `highlight`/`bookmarks` tables, KOReader `util.partialMD5` offsets and the `docsettings`/`hashdocsettings` layouts are implemented from documented behavior and still need hardware confirmation; which store KOReader opens is never inferred. Tests in `tests/test_reading_data.py` use synthetic sidecars only.
+
 ### PR authoring handoff
 
 Use the [canonical PR template](../.github/pull_request_template.md) and [maintainer publication workflow](MAINTAINING.md#pr-helper). Supply the actual diff scope, implemented behavior, compatibility, commands/results/skips and independent-review provenance. Keep self-testing, CI and human/hardware acceptance distinct; mark unavailable evidence explicitly. Rebuild the complete description when implementation or review changes. Required structure takes precedence over prose-polishing preferences.
