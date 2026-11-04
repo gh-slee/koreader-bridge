@@ -118,7 +118,7 @@ python3 koreader-bridge.py --restore-run RUN_ID
 
 Restoration uses the previous run's **TARGET pre-migration snapshot**. It restores recorded originals and removes files created by that migration, while retaining unrelated library files. If the run replaced KOReader, restoration replaces the whole KOReader tree with its previous backup. The SOURCE snapshot is used for a new migration, not this restore.
 
-Exact restoration requires v3.1+ `target-snapshot.json`, `target-changes.json`, a run that modified its target, verified archive pairs and the same device fingerprint. Older target backups without a complete journal are not accepted by this command. The tool creates pre-restore undo backups and asks for final confirmation. Subsequent changes to the affected paths/runtime can be overwritten by restoring an older state; inspect the dry run first.
+Exact restoration requires v3.1+ `target-snapshot.json`, `target-changes.json`, a run that modified its target, verified archive pairs and the same device fingerprint. Older target backups without a complete journal are not accepted by this command. From 1.1.0-dev.6, `target-changes.json` uses schema 2, which adds a per-file `completed` list and a `runtime` progress marker for FULL/KOREADER runs; restore accepts schema 1 and 2 journals and refuses any other version. The tool creates pre-restore undo backups and asks for final confirmation. Subsequent changes to the affected paths/runtime can be overwritten by restoring an older state; inspect the dry run first.
 
 Restore cannot be combined with migration scope/model/conflict flags. Only the recorded state, `--dry-run` and `--backup-dir` control it. This is not an automatic interrupted-run resume feature.
 

@@ -1,6 +1,6 @@
 # Resume interrupted transfer: design (KM-002)
 
-Status: **Proposed, awaiting owner review.** This document describes planned behavior. Nothing in it is implemented, and it does not authorize device access. Implementation starts only after the open decisions below are settled.
+Status: **Accepted design; implementation in progress.** The owner accepted the four [decisions](#decisions) on 2026-11-03. Slice 1 (journal schema 2 and runtime markers) is implemented in 1.1.0-dev.6; resume itself is not. This document does not authorize device access.
 
 Related: [TRACKER.md](../TRACKER.md) (KM-002), [recovery guide](RECOVERY.md), [development guide](DEVELOPMENT.md).
 
@@ -23,7 +23,7 @@ Goals:
 Non-goals:
 
 - Resuming the read-only phases (SOURCE capture, backup creation). An interruption there leaves `interrupted`, not `needs-recovery`; rerun the migration or use `--from-run`.
-- Resuming `restore-target` batches. A failed restore stays a restore problem (see [open decisions](#open-decisions)).
+- Resuming `restore-target` batches. A failed restore stays a restore problem (see [decisions](#decisions)).
 - Changing mode, scope, conflict policy or identity mode while resuming.
 - Native desktop support in the first slice. It follows as a typed IPC request after the CLI is accepted.
 
@@ -101,7 +101,7 @@ Expected identity in `settings.reader.lua`:
 
 Identity mode comes from the resumed batch's scan report. Device IDs never go into logs, `resume-plan.json` or discovery output.
 
-A failed **Keep** check after `copying-library` usually means the reader booted the new runtime between the interruption and the resume, which writes settings, history or statistics. The resume plan reports this as `runtime_changed_after_interruption` and asks for confirmation before replacing (see [open decisions](#open-decisions)).
+A failed **Keep** check after `copying-library` usually means the reader booted the new runtime between the interruption and the resume, which writes settings, history or statistics. The resume plan reports this as `runtime_changed_after_interruption`. Resume archives the current runtime into the resume batch as `koreader-before-resume.zip`, verifies the archive, and asks for confirmation before replacing (see [decisions](#decisions)). The archive is made only in this case.
 
 If `had_adds` was false and `.adds` exists, it stays until the run finishes or rolls back. The existing empty-directory cleanup applies.
 
@@ -139,7 +139,7 @@ Drift means TARGET changed in a way the batch did not cause, for example a book 
 
 - `touched` keeps its meaning and position: it is written and fsynced **before** each write. The KM-001 restore reader is unchanged.
 - `completed` is appended after a file's post-write hash check. It is a progress hint for display and diagnostics only; resume still rehashes. FAT write-back caching means a verified read on the Mac does not prove the bytes reached flash.
-- `runtime.state` records `removing`, `extracting`, `verified` and `identity-applied` for new batches. It sharpens the plan display. The rules in [runtime replacement](#runtime-replacement) stay authoritative, so batches written before this change resume the same way.
+- `runtime` is `null` for LIBRARY batches and for restore batches. For FULL/KOREADER migration batches it is `{"action": "replace", "state": ...}`, where `state` moves through `pending`, `removing`, `extracting`, `verified` and `identity-applied`. Each change is written before the step it names starts, except `verified` and `identity-applied`, which are written after their step succeeds. It sharpens the plan display. The rules in [runtime replacement](#runtime-replacement) stay authoritative, so batches written before this change resume the same way.
 - Journal writes keep using `atomic_json` (temporary file, fsync, rename, directory fsync) under the run folder on the Mac, never on TARGET.
 
 A resume batch writes its own `target-changes.json` that lists only its own writes. Restore combines the chain's journals (see below).
@@ -180,16 +180,18 @@ Physical acceptance stays separate: a controlled interruption on a reader the ow
 
 ## Implementation slices
 
-1. **Journal v2 and runtime markers.** Additive writes in migration and restore, with no behavior change. Restore and cleanup read both schemas.
+1. **Journal v2 and runtime markers** (implemented in 1.1.0-dev.6). Migration and restore write schema 2 through the shared writer, with no behavior change. Runtime markers are written for migration batches only, since restore batches are not resumable. Restore reads schema 1 and 2 and refuses any other version before connecting a reader. Cleanup does not read the journal.
 2. **Resume planner (read-only).** `--resume-run --dry-run`: eligibility, chain, source/backup verification, identity, runtime check, library classification, `resume-plan.json`.
 3. **Resume writer.** Runtime action, library copy, chain-aware automatic rollback, final status.
 4. **Chain-aware restore and cleanup.** `--restore-run` across resume chains, superseded-link refusal, `--list-runs` display, cleanup dependencies.
 5. **Docs and locales.** USAGE, RECOVERY, TROUBLESHOOTING, three catalogs, ACCEPTANCE entry, version bump.
 6. **Desktop (later, separately scoped).** A typed `resume_run` request from a catalog run ID, a Backups-page action and a request-scoped review sheet.
 
-## Open decisions
+## Decisions
 
-1. **Pre-resume runtime snapshot.** When the **Keep** check fails after `copying-library` (the reader was probably used), should resume first archive the current runtime into the resume batch? Recommendation: yes, only in this case. It keeps any reading done after the interruption recoverable at the cost of one runtime-sized ZIP. Otherwise the replaced runtime is never a state the user chose.
-2. **Library drift policy.** The recommendation is to refuse on any drift. An alternative is to exclude drifted paths and report them, which is less safe and adds a new partial-plan state. Recommendation: refuse in the first version.
-3. **Resuming failed restores.** The recommendation is to leave `restore-target` batches out of scope. A failed restore can be retried with `--restore-run` against the same original batch once chain-aware restore exists.
-4. **Option name.** `--resume-run` matches `--from-run`, `--restore-run` and `--verify-run`. Confirm before catalog and help text are written.
+The owner accepted all four recommendations on 2026-11-03.
+
+1. **Pre-resume runtime snapshot: yes, only when needed.** When the **Keep** check fails after `copying-library`, resume archives and verifies the current runtime before replacing it. No snapshot is made in any other case.
+2. **Library drift: refuse.** Any drifted path refuses the resume and is named in the plan. There is no partial-plan mode.
+3. **Failed restores: out of scope.** `restore-target` batches are not resumable. Retry with `--restore-run` against the original batch once chain-aware restore exists.
+4. **Option name: `--resume-run`.**
