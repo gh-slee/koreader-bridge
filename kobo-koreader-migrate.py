@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 PROJECT_NAME = "KOReader Bridge"
-VERSION = "1.1.0-dev.5"
+VERSION = "1.1.0-dev.6"
 DEFAULT_BACKUP_DIR = Path(__file__).resolve().parent
 VOLUME_ROOT = Path("/Volumes")
 
@@ -1916,6 +1916,9 @@ def restore_payload(target: Path, archive: Path, files: dict, journal: dict) -> 
                 copy_with_progress(src, dst, f'Copying {rel}', meta['size'])
             if path.stat().st_size != meta['size'] or sha256_file(path) != meta['sha256']:
                 raise MigrationError(message('error.payload_verify', path=rel))
+            # Progress hint only; resume must rehash before trusting a completed path.
+            journal.setdefault('completed', []).append(rel)
+            persist_target_changes(journal)
             print_progress(message('progress.copy_payload'), idx, len(files))
 
 
@@ -3689,12 +3692,23 @@ def migrate_saved_source(args, project: Path, run: Path, run_id: str, log_path: 
                           source_reading=source_reading)
 
 
+TARGET_CHANGES_SCHEMAS = (1, 2)
+
+
 def persist_target_changes(journal: dict):
+    # Schema 2 is additive: touched/created_dirs keep their schema 1 meaning.
     if CURRENT_RUN is not None and journal.get('_mount') is not None:
         mount = journal['_mount']
         atomic_json(CURRENT_RUN.directory / 'target-changes.json', {
-            'schema_version': 1, 'touched': journal['touched'],
-            'created_dirs': [p.relative_to(mount).as_posix() for p in journal['created_dirs']]})
+            'schema_version': 2, 'touched': journal['touched'],
+            'completed': journal.get('completed', []),
+            'created_dirs': [p.relative_to(mount).as_posix() for p in journal['created_dirs']],
+            'runtime': journal.get('runtime')})
+
+
+def mark_runtime(journal: dict, state: str) -> None:
+    journal['runtime'] = {'action': 'replace', 'state': state}
+    persist_target_changes(journal)
 
 
 def restore_saved_target(args, project: Path, run: Path, run_id: str, log_path: Path) -> int:
@@ -3706,6 +3720,8 @@ def restore_saved_target(args, project: Path, run: Path, run_id: str, log_path: 
     if descriptor.get('replaced_koreader') and descriptor.get('had_koreader') and not descriptor.get('koreader'):
         raise MigrationError(message('error.original_backup_missing'))
     changes = read_json(saved / 'target-changes.json')
+    if changes.get('schema_version', 1) not in TARGET_CHANGES_SCHEMAS:
+        raise MigrationError(message('error.change_journal'))
     prior_state = read_json(saved / 'run.json')
     if not prior_state.get('target_modified'):
         raise MigrationError(message('error.restore_unneeded'))
@@ -3714,7 +3730,9 @@ def restore_saved_target(args, project: Path, run: Path, run_id: str, log_path: 
     payload_archive, payload_manifest = load_artifact(saved, descriptor.get('payload'), 'payload')
     previous = payload_manifest['files'] if payload_manifest else {}
     touched = changes.get('touched', [])
-    if not isinstance(touched, list) or any(not isinstance(p, str) for p in touched):
+    created = changes.get('created_dirs', [])
+    if (not isinstance(touched, list) or any(not isinstance(p, str) for p in touched)
+            or not isinstance(created, list) or any(not isinstance(p, str) for p in created)):
         raise MigrationError(message('error.change_journal'))
     allowed_paths = set(descriptor.get('planned_paths', []))
     if not set(touched) <= allowed_paths:
@@ -3776,7 +3794,7 @@ def restore_saved_target(args, project: Path, run: Path, run_id: str, log_path: 
     if not prompt_yes_no(message('confirm.restore_target')):
         safe_eject(mount)
         raise MigrationCancelled(message('cancel.restore'))
-    journal = {'touched': [], 'created_dirs': [], '_mount': mount}
+    journal = {'touched': [], 'completed': [], 'created_dirs': [], '_mount': mount, 'runtime': None}
     kr_modified = False
     try:
         confirm_device(mount, original.fingerprint_sha256)
@@ -4058,7 +4076,8 @@ def migrate_target(args, backup_dir, run_id, log_path, mode, dry_run, full, book
     if not prompt_yes_no(message('confirm.migration')):
         safe_eject(target_mount)
         raise MigrationCancelled(message('cancel.final'))
-    journal = {'touched': [], 'created_dirs': [], '_mount': target_mount}
+    journal = {'touched': [], 'completed': [], 'created_dirs': [], '_mount': target_mount,
+               'runtime': {'action': 'replace', 'state': 'pending'} if full else None}
     persist_target_changes(journal)
     kr_modified = False
     adds_created = False
@@ -4074,12 +4093,16 @@ def migrate_target(args, backup_dir, run_id, log_path, mode, dry_run, full, book
             if target_kr.exists():
                 if not target_kr.is_dir():
                     raise MigrationError(message('error.target_directory'))
+                mark_runtime(journal, 'removing')
                 remove_tree(target_kr)
+            mark_runtime(journal, 'extracting')
             restore_zip(source_zip, target_adds)
             remove_stale_caches(target_kr)
             remove_macos_metadata(target_kr)
             verify_restored_tree(target_kr, source_manifest)
+            mark_runtime(journal, 'verified')
             apply_identity_mode(target_kr, identity_mode, target_id)
+            mark_runtime(journal, 'identity-applied')
             ensure_source_structure(target_mount)
         if plan['copy']:
             run_phase('copying-library', target_modified=True)

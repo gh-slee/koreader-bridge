@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0-dev.6: resumable change journal
+
+- Write `target-changes.json` as schema 2, the first step toward resuming interrupted transfers (KM-002). `touched` and `created_dirs` keep their meaning. The new `completed` list records each library file after its post-write hash check, and `runtime` records FULL/KOREADER replacement progress (`pending`, `removing`, `extracting`, `verified`, `identity-applied`). Both are hints for a future resume, which will rehash before trusting them.
+- `--restore-run` reads schema 1 and 2 journals and refuses an unknown schema version or malformed `created_dirs` before asking for a reader. Migration, restore and rollback behavior is otherwise unchanged. `--resume-run` is designed in `docs/RESUME_DESIGN.md` but not implemented.
+
 ## 1.1.0-dev.5: reading-data conflict report
 
 - Add a read-only reading-data section to `difference.json` and `difference.txt` for FULL and LIBRARY runs, including previews, AUDIT and saved-source reuse. For each book it compares the progress, position, status and annotation counts in KOReader `metadata.<ext>.lua` sidecars and central `docsettings`/`hashdocsettings` stores, and reports which TARGET reading data or annotations the existing plan will replace.
