@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0-dev.8: resume interrupted migrations
+
+- `--resume-run RUN_ID` now continues an interrupted migration (KM-002 slices 3-4). After the preview checks and a final confirmation that defaults to No, it replaces the KOReader runtime only when needed and copies only remaining and partly written files. Before replacing a runtime that was probably used after the interruption, it saves and verifies `koreader-before-resume.zip`. `--dry-run` still previews without writes.
+- A failed resume rolls TARGET back to the original pre-migration state, using the first batch's backups and every journal in the chain. An interrupted resume becomes `needs-recovery` and can itself be resumed; older links in a chain are refused.
+- `--restore-run` follows resume chains back to the first batch and refuses a batch that a newer resume continues. `--list-runs` shows `resumed by <run-id>`. Cleanup keeps every batch a resume depends on. Desktop support remains future work.
+
 ## 1.1.0-dev.7: read-only resume preview
 
 - Add `--resume-run RUN_ID --dry-run` (KM-002 slice 2). It accepts only `needs-recovery` migration and saved-source batches that changed TARGET and stopped while replacing KOReader, copying, writing the result, ejecting or rolling back. A batch already resumed by a newer run is refused.

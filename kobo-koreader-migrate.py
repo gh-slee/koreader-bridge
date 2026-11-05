@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 PROJECT_NAME = "KOReader Bridge"
-VERSION = "1.1.0-dev.7"
+VERSION = "1.1.0-dev.8"
 DEFAULT_BACKUP_DIR = Path(__file__).resolve().parent
 VOLUME_ROOT = Path("/Volumes")
 
@@ -500,6 +500,9 @@ UI_MESSAGE_FIELDS = {
     'error.resume_plan_missing': set(), 'error.resume_plan_invalid': set(),
     'error.resume_plan_mismatch': {'path'}, 'error.resume_backup_incomplete': set(),
     'error.resume_target_model': set(), 'error.resume_drift': {'count'},
+    'error.resume_chain': set(), 'error.restore_superseded': {'run_id', 'other'},
+    'resume.final_plan': {'runtime', 'count'}, 'confirm.resume': set(), 'cancel.resume': set(),
+    'resume.success': {'path'}, 'resume.rolled_back': set(), 'catalog.resumed_by': {'run_id'},
     'restore.scope': set(),
     'restore.plan': {'remove_count', 'runtime', 'restore_count'},
     'restore.original': {'path'},
@@ -719,7 +722,7 @@ UI_MESSAGE_FIELDS = {
     'argument.restore_settings': set(),
     'argument.preview_settings': set(),
     'argument.verify_settings': set(),
-    'argument.resume_settings': set(), 'argument.resume_dry_run_only': set(),
+    'argument.resume_settings': set(),
     'lock.project': set(),
     'lock.device': set(),
     'diagnostic.join': {'first', 'second'},
@@ -2144,9 +2147,6 @@ def parse_args() -> argparse.Namespace:
             or args.conflict or args.include_dir or args.exclude_dir or args.extra_extension
             or not args.reading_data or args.delete_run or args.self_test):
         parser.error(bundle.render('argument.resume_settings'))
-    if args.resume_run and not args.dry_run:
-        # Resume writes are a later slice; never create a writing resume batch yet.
-        parser.error(bundle.render('argument.resume_dry_run_only'))
     args.locale = bundle.tag
     args.locale_bundle = bundle
     if (args.preview_ui or args.list_locales) and (args.mode or args.self_test or args.books is not None or args.fonts is not None
@@ -3428,7 +3428,14 @@ def run_catalog(project: Path) -> List[dict]:
         if not isinstance(state.get('dependencies', []), list) or any(not isinstance(d, str) for d in state.get('dependencies', [])):
             state = {'status': 'unreadable'}
         total = sum(p.stat().st_size for p in run.rglob('*') if p.is_file() and not p.is_symlink())
-        records.append({'run_id': run.name, 'path': str(run), 'bytes': total,
+        resumes = None
+        reference = run / 'resume-reference.json'
+        if reference.is_file() and not reference.is_symlink():
+            try:
+                resumes = read_json(reference).get('run_id')
+            except MigrationError:
+                resumes = None
+        records.append({'resumes': resumes if isinstance(resumes, str) else None, 'run_id': run.name, 'path': str(run), 'bytes': total,
                         'status': state.get('status', 'legacy/unknown'),
                         'ended_at': state.get('ended_at'), 'operation': state.get('operation', 'unknown'),
                         'dependencies': state.get('dependencies', []), 'target_modified': state.get('target_modified', False),
@@ -3471,8 +3478,12 @@ def cleanup_plan(project: Path, keep_successful: int = 2) -> dict:
 
 def print_catalog(records: List[dict]):
     ui_emit('catalog.heading')
+    resumed_by = {record['resumes']: record['run_id'] for record in records
+                  if record.get('resumes') and record['status'] in RESUME_BLOCKING_STATUSES}
     for record in records:
         ui_emit('catalog.row', run_id=record["run_id"], status=record["status"], operation=record["operation"], size=human_bytes(record["bytes"]))
+        if record['run_id'] in resumed_by:
+            ui_emit('catalog.resumed_by', run_id=resumed_by[record['run_id']])
     if not records:
         ui_emit('catalog.empty')
 
@@ -3598,7 +3609,7 @@ def run_main(args) -> int:
                         if operation == 'restore-target':
                             code = restore_saved_target(args, project, directory, run_id, log_path)
                         elif operation == 'resume-migration':
-                            code = plan_resume(args, project, directory, run_id, log_path)
+                            code = resume_migration(args, project, directory, run_id, log_path)
                         elif operation == 'saved-source':
                             code = migrate_saved_source(args, project, directory, run_id, log_path)
                         else:
@@ -3754,19 +3765,26 @@ def mark_runtime(journal: dict, state: str) -> None:
 
 def restore_saved_target(args, project: Path, run: Path, run_id: str, log_path: Path) -> int:
     saved = resolve_saved_run(project, args.restore_run)
-    run_phase('verifying-target-snapshot', dependencies=[saved.name], dry_run=args.dry_run)
-    descriptor = read_json(saved / 'target-snapshot.json')
+    # A resumed migration restores to the first batch's pre-migration state using every link's journal.
+    links = resolve_resume_chain(project, saved)
+    root = links[0]
+    run_phase('verifying-target-snapshot', dependencies=sorted(link.name for link in links), dry_run=args.dry_run)
+    successor = resume_successor(project, saved.name, exclude={run.name})
+    if successor:
+        raise MigrationError(message('error.restore_superseded', run_id=saved.name, other=successor))
+    descriptor = read_json(root / 'target-snapshot.json')
     if descriptor.get('role') != 'target':
         raise MigrationError(message('error.target_snapshot'))
     if descriptor.get('replaced_koreader') and descriptor.get('had_koreader') and not descriptor.get('koreader'):
         raise MigrationError(message('error.original_backup_missing'))
-    changes = read_change_journal(saved)
+    changes = chain_changes(links)
     prior_state = read_json(saved / 'run.json')
-    if not prior_state.get('target_modified'):
+    resumed = prior_state.get('operation') == 'resume-migration' and prior_state.get('status') == 'success'
+    if not (prior_state.get('target_modified') or resumed):
         raise MigrationError(message('error.restore_unneeded'))
     original = DeviceInfo(**descriptor['device'])
-    kr_archive, kr_manifest = load_artifact(saved, descriptor.get('koreader'), 'koreader')
-    payload_archive, payload_manifest = load_artifact(saved, descriptor.get('payload'), 'payload')
+    kr_archive, kr_manifest = load_artifact(root, descriptor.get('koreader'), 'koreader')
+    payload_archive, payload_manifest = load_artifact(root, descriptor.get('payload'), 'payload')
     previous = payload_manifest['files'] if payload_manifest else {}
     touched = changes.get('touched', [])
     allowed_paths = set(descriptor.get('planned_paths', []))
@@ -3885,7 +3903,7 @@ def restore_saved_target(args, project: Path, run: Path, run_id: str, log_path: 
     return 0
 
 
-RESUMABLE_OPERATIONS = frozenset({'migration', 'saved-source'})
+RESUMABLE_OPERATIONS = frozenset({'migration', 'saved-source', 'resume-migration'})
 RESUMABLE_PHASES = frozenset({'replacing-koreader', 'copying-library', 'writing-result',
                               'ejecting-target', 'rolling-back'})
 RUNTIME_SETTINGS = 'settings.reader.lua'
@@ -3981,10 +3999,81 @@ def string_list(value) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def plan_resume(args, project: Path, run: Path, run_id: str, log_path: Path) -> int:
-    """Read-only resume preview (KM-002 slice 2): verify everything, classify TARGET, write no device files."""
+RESUME_BLOCKING_STATUSES = frozenset({'success', 'running', 'needs-recovery'})
+RESUME_ROOT_OPERATIONS = frozenset({'migration', 'saved-source'})
+
+
+def resume_successor(project: Path, run_name: str, exclude=()) -> Optional[str]:
+    """Newer resume batch that already continues run_name, if any."""
+    for record in run_catalog(project):
+        if (record['run_id'] not in exclude and record.get('resumes') == run_name
+                and record['status'] in RESUME_BLOCKING_STATUSES):
+            return record['run_id']
+    return None
+
+
+def resolve_resume_chain(project: Path, run: Path) -> List[Path]:
+    """[original batch, resume, ..., run] following resume-reference.json links."""
+    links, seen = [run], {run.name}
+    while (links[0] / 'resume-reference.json').exists():
+        reference = read_json(links[0] / 'resume-reference.json').get('run_id')
+        if not isinstance(reference, str):
+            raise MigrationError(message('error.resume_chain'))
+        previous = resolve_saved_run(project, reference)
+        if previous.name in seen or len(seen) > 20:
+            raise MigrationError(message('error.resume_chain'))
+        seen.add(previous.name)
+        links.insert(0, previous)
+    if len(links) > 1:
+        operations = [read_json(link / 'run.json').get('operation') for link in links]
+        if operations[0] not in RESUME_ROOT_OPERATIONS or any(op != 'resume-migration' for op in operations[1:]):
+            raise MigrationError(message('error.resume_chain'))
+    return links
+
+
+def chain_changes(links: List[Path]) -> dict:
+    """Union of the change journals in a resume chain; the original batch must have one."""
+    touched, created = [], []
+    for index, link in enumerate(links):
+        if index and not (link / 'target-changes.json').exists():
+            continue  # A resume that stopped before its first write has no journal.
+        changes = read_change_journal(link)
+        touched += [p for p in changes.get('touched', []) if p not in touched]
+        created += [p for p in changes.get('created_dirs', []) if p not in created]
+    return {'touched': touched, 'created_dirs': created}
+
+
+def rollback_resume_chain(mount: Path, links: List[Path], journal: dict, descriptor: dict,
+                          payload_backup: Optional[Path], previous: dict,
+                          kr_backup: Optional[Path], kr_backup_manifest: Optional[dict]) -> List[str]:
+    """Return TARGET to the original pre-migration state recorded by the first batch."""
+    errors = []
+    prior = chain_changes(links[:-1]) if len(links) > 1 else {'touched': [], 'created_dirs': []}
+    touched = prior['touched'] + [p for p in journal['touched'] if p not in prior['touched']]
+    created = []
+    try:
+        for rel in prior['created_dirs']:
+            created.append(checked_path(mount, rel, allow_metadata=rel.startswith(RUNTIME_PREFIX)))
+        created += [p for p in journal['created_dirs'] if p not in created]
+        rollback_payload(mount, payload_backup, previous, {'touched': touched, 'created_dirs': created})
+    except Exception as error:
+        errors.append(message('recovery.payload_error', detail=exception_detail(error)))
+    if descriptor.get('replaced_koreader'):
+        try:
+            kr = checked_path(mount, '.adds/koreader', allow_metadata=True)
+            rollback_target(kr, kr.parent, kr_backup, kr_backup_manifest)
+            if not descriptor.get('had_adds', True) and kr.parent.is_dir() and not any(kr.parent.iterdir()):
+                kr.parent.rmdir()
+        except Exception as error:
+            errors.append(message('recovery.runtime_error', detail=exception_detail(error)))
+    return errors
+
+
+def resume_migration(args, project: Path, run: Path, run_id: str, log_path: Path) -> int:
+    """Continue an interrupted migration forward (KM-002). --dry-run previews without device writes."""
+    dry_run = args.dry_run
     saved = resolve_saved_run(project, args.resume_run)
-    run_phase('verifying-resume', dependencies=[saved.name], dry_run=True)
+    run_phase('verifying-resume', dependencies=[saved.name], dry_run=dry_run)
     prior = read_json(saved / 'run.json')
     if prior.get('operation') not in RESUMABLE_OPERATIONS:
         raise MigrationError(message('error.resume_operation', operation=str(prior.get('operation'))))
@@ -3992,19 +4081,18 @@ def plan_resume(args, project: Path, run: Path, run_id: str, log_path: Path) -> 
         raise MigrationError(message('error.resume_status', status=str(prior.get('status'))))
     if prior.get('phase') not in RESUMABLE_PHASES:
         raise MigrationError(message('error.resume_phase', phase=str(prior.get('phase'))))
-    for record in run_catalog(project):
-        reference = Path(record['path']) / 'resume-reference.json'
-        if record['run_id'] in {saved.name, run.name} or not reference.exists():
-            continue
-        if record['status'] in {'success', 'running', 'needs-recovery'} and read_json(reference).get('run_id') == saved.name:
-            raise MigrationError(message('error.resume_superseded', run_id=saved.name, other=record['run_id']))
+    successor = resume_successor(project, saved.name, exclude={run.name})
+    if successor:
+        raise MigrationError(message('error.resume_superseded', run_id=saved.name, other=successor))
+    links = resolve_resume_chain(project, saved)
+    root = links[0]
     atomic_json(run / 'resume-reference.json', {'run_id': saved.name})
 
-    descriptor = read_json(saved / 'target-snapshot.json')
+    descriptor = read_json(root / 'target-snapshot.json')
     if descriptor.get('role') != 'target' or not isinstance(descriptor.get('device'), dict):
         raise MigrationError(message('error.target_snapshot'))
-    changes = read_change_journal(saved)
-    report = read_json(saved / f'koreader-scan-{saved.name}.json')
+    changes = chain_changes(links)
+    report = read_json(root / f'koreader-scan-{root.name}.json')
     plan = report.get('plan')
     if not isinstance(plan, dict) or not isinstance(plan.get('copy'), dict):
         raise MigrationError(message('error.resume_plan_missing'))
@@ -4016,7 +4104,7 @@ def plan_resume(args, project: Path, run: Path, run_id: str, log_path: Path) -> 
     planned_paths = descriptor.get('planned_paths', [])
     if not string_list(planned_paths) or set(planned_paths) != set(copy):
         raise MigrationError(message('error.resume_plan_invalid'))
-    touched = set(changes.get('touched', []))
+    touched = set(changes['touched'])
     if not touched <= set(copy):
         raise MigrationError(message('error.change_paths'))
     full = bool(descriptor.get('replaced_koreader'))
@@ -4024,8 +4112,8 @@ def plan_resume(args, project: Path, run: Path, run_id: str, log_path: Path) -> 
     if full and identity_mode not in {'preserve', 'new', 'clone'}:
         raise MigrationError(message('error.resume_plan_invalid'))
 
-    source_run, chain = resolve_source_chain(project, saved)
-    run_phase('verifying-resume', dependencies=sorted(chain | {saved.name}))
+    source_run, chain = resolve_source_chain(project, root)
+    run_phase('verifying-resume', dependencies=sorted(chain | {link.name for link in links}))
     source = source_descriptor(source_run)
     if source.get('role', 'source') != 'source' or not isinstance(source.get('device'), dict):
         raise MigrationError(message('error.source_descriptor'))
@@ -4045,18 +4133,18 @@ def plan_resume(args, project: Path, run: Path, run_id: str, log_path: Path) -> 
         source_zip, source_manifest = load_artifact(source_run, source.get('koreader'), 'koreader')
         if source_zip is None:
             raise MigrationError(message('error.runtime_archive_missing'))
-    payload_files = {}
+    payload_zip, payload_files = None, {}
     if copy or skip:
-        _, payload_manifest = load_artifact(source_run, source.get('payload'), 'payload')
+        payload_zip, payload_manifest = load_artifact(source_run, source.get('payload'), 'payload')
         payload_files = (payload_manifest or {}).get('files', {})
     for rel in list(copy) + skip:
         planned, actual = copy.get(rel), payload_files.get(rel)
         if actual is None or (planned is not None and (actual['size'], actual['sha256']) != (planned['size'], planned['sha256'])):
             raise MigrationError(message('error.resume_plan_mismatch', path=rel))
-    kr_backup, _ = load_artifact(saved, descriptor.get('koreader'), 'koreader')
+    kr_backup, kr_backup_manifest = load_artifact(root, descriptor.get('koreader'), 'koreader')
     if full and descriptor.get('had_koreader') and kr_backup is None:
         raise MigrationError(message('error.original_backup_missing'))
-    _, payload_backup_manifest = load_artifact(saved, descriptor.get('payload'), 'payload')
+    payload_backup, payload_backup_manifest = load_artifact(root, descriptor.get('payload'), 'payload')
     previous = payload_backup_manifest['files'] if payload_backup_manifest else {}
     if not set(existing) <= set(previous):
         raise MigrationError(message('error.resume_backup_incomplete'))
@@ -4115,15 +4203,19 @@ def plan_resume(args, project: Path, run: Path, run_id: str, log_path: Path) -> 
                 classes['drifted'].append(rel)
         except MigrationError:
             classes['drifted'].append(rel)
-    write_bytes = sum(copy[rel]['size'] for rel in classes['remaining'] + classes['partial'])
+    pending = set(classes['remaining'] + classes['partial'])
+    to_write = {rel: meta for rel, meta in copy.items() if rel in pending}
+    write_bytes = sum(meta['size'] for meta in to_write.values())
     runtime_bytes = sum(m['size'] for m in source_runtime.values()) if runtime['action'] == 'replace' else 0
     resume_plan = {'schema_version': 1, 'tool_version': VERSION, 'operation': 'resume-migration',
-                   'resumed_run': saved.name, 'source_run': source_run.name, 'mode': report.get('mode'),
+                   'resumed_run': saved.name, 'root_run': root.name, 'chain': [link.name for link in links],
+                   'source_run': source_run.name, 'mode': report.get('mode'),
                    'interrupted_phase': phase, 'identity_mode': identity_mode, 'runtime': runtime,
                    'library': {key: sorted(value) for key, value in classes.items()},
                    'counts': {key: len(value) for key, value in classes.items()},
                    'write_bytes': write_bytes, 'runtime_bytes': runtime_bytes,
-                   'journal_completed_hint': len(changes.get('completed', []))}
+                   'journal_completed_hint': len(read_change_journal(saved).get('completed', []))
+                   if (saved / 'target-changes.json').exists() else 0}
     plan_path = run / 'resume-plan.json'
     atomic_json(plan_path, resume_plan)
 
@@ -4144,8 +4236,9 @@ def plan_resume(args, project: Path, run: Path, run_id: str, log_path: Path) -> 
         for rel in drifted:
             ui_emit('resume.drifted', path=rel, severity='error')
         raise MigrationError(message('error.resume_drift', count=len(drifted)))
-    if runtime['action'] == 'replace':
-        current_kr = walk_tree_stats(kr)[1]
+    replacing = runtime['action'] == 'replace'
+    current_kr = walk_tree_stats(kr)[1] if replacing else 0
+    if replacing:
         ensure_target_space(mount, runtime_bytes + write_bytes, current_kr)
         if runtime['snapshot_before_replace']:
             ensure_backup_space(run, current_kr, message('space.pre_resume'))
@@ -4155,8 +4248,85 @@ def plan_resume(args, project: Path, run: Path, run_id: str, log_path: Path) -> 
         ui_emit('space.library', free=human_bytes(free), need=human_bytes(need))
         if free < need:
             raise MigrationError(message('error.library_space'))
-    ui_emit('resume.preview', path=plan_path)
+    if dry_run:
+        ui_emit('resume.preview', path=plan_path)
+        safe_eject(mount)
+        return 0
+
+    snapshot = None
+    if runtime['snapshot_before_replace']:
+        # The reader may have been used after the interruption; keep that runtime recoverable.
+        log_status(message('workflow.backup_runtime'))
+        plugins, warnings = basic_plugin_audit(kr)
+        snapshot = run / 'koreader-before-resume.zip'
+        create_archive(kr, snapshot, snapshot.with_suffix('.manifest.json'), info, plugins, warnings, strict_source=False)
+    run_phase('awaiting-final-confirmation')
+    ui_emit('resume.final_plan', runtime=display_bool(replacing), count=len(to_write))
+    if not prompt_yes_no(message('confirm.resume')):
+        safe_eject(mount)
+        raise MigrationCancelled(message('cancel.resume'))
+    journal = {'touched': [], 'completed': [], 'created_dirs': [], '_mount': mount,
+               'runtime': {'action': 'replace', 'state': 'pending'} if replacing else None}
+    persist_target_changes(journal)
+    try:
+        confirm_device(mount, original.fingerprint_sha256)
+        if replacing:
+            run_phase('replacing-koreader', target_modified=True)
+            checked_path(mount, '.adds/koreader', allow_metadata=True)
+            kr.parent.mkdir(exist_ok=True)
+            if kr.exists():
+                mark_runtime(journal, 'removing')
+                remove_tree(kr)
+            mark_runtime(journal, 'extracting')
+            restore_zip(source_zip, kr.parent)
+            remove_stale_caches(kr)
+            remove_macos_metadata(kr)
+            verify_restored_tree(kr, source_manifest)
+            mark_runtime(journal, 'verified')
+            apply_identity_mode(kr, identity_mode, original_id)
+            mark_runtime(journal, 'identity-applied')
+            ensure_source_structure(mount)
+        if to_write:
+            run_phase('copying-library', target_modified=True)
+            restore_payload(mount, payload_zip, to_write, journal)
+        after = device_diagnostics(mount)
+        source_diag = source.get('source_diagnostics') or {}
+        if full and 'statistics' in source_diag and after['statistics'] != source_diag['statistics']:
+            raise MigrationError(message('error.statistics_changed'))
+        run_phase('writing-result')
+        result_path = run / f'koreader-migration-result-{run_id}.json'
+        atomic_json(result_path, {
+            'tool_version': VERSION, 'operation': 'resume-migration', 'mode': report.get('mode'),
+            'completed_at': iso_now(), 'resumed_run': saved.name, 'root_run': root.name,
+            'runtime_action': runtime['action'], 'payload_copied': len(to_write),
+            'verified_skipped': len(classes['verified']),
+            'pre_resume_runtime_backup': snapshot.name if snapshot else None,
+            'diagnostics_after': after, 'log': str(log_path)})
+    except (Exception, KeyboardInterrupt) as exc:
+        try:
+            run_phase('rolling-back')
+        except OSError as status_error:
+            log_status(message('recovery.status_error', detail=exception_detail(status_error)))
+        ui_emit('recovery.migration_failed', kind=type(exc).__name__, detail=exception_detail(exc), severity='error')
+        try:
+            confirm_device(mount, original.fingerprint_sha256)
+        except Exception as guard_exc:
+            ui_emit('recovery.blocked', detail=exception_detail(guard_exc), severity='error')
+            ui_emit('recovery.reconnect')
+            return 3
+        errors = rollback_resume_chain(mount, links + [run], journal, descriptor, payload_backup, previous,
+                                       kr_backup, kr_backup_manifest)
+        if errors:
+            for error in errors:
+                ui_emit('recovery.error', detail=diagnostic_detail(error), severity='error')
+            ui_emit('recovery.keep_connected')
+            return 3
+        ui_emit('resume.rolled_back')
+        return 2
+    ui_emit('resume.success', path=result_path)
+    run_phase('ejecting-target')
     safe_eject(mount)
+    ui_emit('migration.done')
     return 0
 
 

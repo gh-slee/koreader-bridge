@@ -419,12 +419,11 @@
     "reading_data.flag_target_annotations_replaced": "TARGET annotations will be replaced",
     "reading_data.flag_target_kept": "SOURCE reading data will not be copied (TARGET kept)",
     "reading_data.flag_retained_for_different_book": "TARGET metadata stays while the book is replaced",
-    "help.resume_run": "Preview resuming an interrupted needs-recovery migration from a previous run (requires --dry-run; no TARGET writes).",
+    "help.resume_run": "Continue an interrupted needs-recovery migration from a previous run; add --dry-run to preview without TARGET writes.",
     "argument.resume_settings": "--resume-run continues the saved plan; only --dry-run, --target-model, --backup-dir and --locale may be given",
-    "argument.resume_dry_run_only": "--resume-run currently requires --dry-run; resuming TARGET writes is not implemented yet",
     "prompt.resume_target": "Plug in the interrupted TARGET ({model}), then press Return...",
     "resume.heading": "RESUME PREVIEW for run {run_id}: {model}",
-    "resume.scope": "Checks the saved archives, the original TARGET backups and current TARGET files against the saved plan. Nothing on the Kobo is changed.",
+    "resume.scope": "Checks the saved archives, the original TARGET backups and current TARGET files against the saved plan before anything changes. A --dry-run preview changes nothing on the Kobo.",
     "resume.runtime_none": "KOReader runtime: not part of this migration.",
     "resume.runtime_keep": "KOReader runtime: complete and verified; it would be kept.",
     "resume.runtime_replace_interrupted": "KOReader runtime: interrupted while being replaced; it would be replaced again from the verified source archive.",
@@ -443,6 +442,14 @@
     "error.resume_plan_mismatch": "Saved plan entry does not match the source archive manifest: {path}",
     "error.resume_backup_incomplete": "The original TARGET backup does not contain every file the plan overwrites.",
     "error.resume_target_model": "--target-model does not match the TARGET model saved in this run.",
-    "error.resume_drift": "Resume refused: {count} TARGET path(s) changed outside this migration. Restore with --restore-run or start a new migration."
+    "error.resume_drift": "Resume refused: {count} TARGET path(s) changed outside this migration. Restore with --restore-run or start a new migration.",
+    "resume.final_plan": "Final resume plan: replace KOReader runtime: {runtime}; library files to write: {count}. Files already verified are kept.",
+    "confirm.resume": "Proceed with resuming this migration?",
+    "cancel.resume": "Resume cancelled. No TARGET files were modified by this run. Target safely ejected; backups retained.",
+    "resume.success": "RESUME SUCCESSFUL. Result: {path}",
+    "resume.rolled_back": "Resume failed; automatic rollback restored the original pre-migration TARGET state. Target left connected for inspection.",
+    "catalog.resumed_by": "    resumed by {run_id}",
+    "error.resume_chain": "The resume history for this run is invalid, so it cannot be used.",
+    "error.restore_superseded": "Run {run_id} was resumed by run {other}; restore run {other} instead."
   }
 }
