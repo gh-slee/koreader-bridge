@@ -281,6 +281,7 @@ Status: Ready for test. No Kobo is required. Use a copy of an output root, or di
 - Run `--verify-run <run-id>` on an existing successful FULL batch. Every archive, including `-pre-migration-` TARGET backups, should be reported as verified, exit status 0 and the batch should be unchanged.
 - On a disposable copy, alter one archive byte, remove one manifest and rename a referenced file. Each should be reported as failed with exit status 1.
 - Confirm the command refuses migration settings, symlinked batches and paths outside `runs/`, and that zh-Hant/zh-Hans output reads correctly.
+- From 1.1.0-dev.9: run `--verify-all` on a real output root and confirm every successful batch verifies and previews show as empty. Run `--verify-run <saved-source-or-resume-run> --with-dependencies` and confirm the original batch is checked too. Pipe `--json` into a JSON tool and confirm it parses, holds no absolute paths and exits 1 after one disposable copy is corrupted.
 
 ## Native review and language acceptance (1.1.0-dev.3)
 

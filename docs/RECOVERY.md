@@ -92,6 +92,18 @@ python3 koreader-bridge.py --verify-run <run-id>
 
 The check pairs each `*.zip` with its `*.manifest.json` and applies the same rules used before saved-source and restore writes: archive SHA-256, member sizes and hashes, unsafe or duplicate paths, unlisted members and snapshot references. It lists each artifact as verified or failed and exits with status 1 if anything fails. It reads only; it never repairs, rewrites or deletes files. A batch still marked `running` may be incomplete. Saved-source and restore commands verify again before writing, so a passing result does not replace those checks.
 
+From 1.1.0-dev.9 you can check several batches at once:
+
+```bash
+python3 koreader-bridge.py --verify-run RUN_A --verify-run RUN_B
+python3 koreader-bridge.py --verify-run RUN_ID --with-dependencies
+python3 koreader-bridge.py --verify-all --json > verify.json
+```
+
+`--with-dependencies` also checks every batch a run relies on: its saved SOURCE (`source-reference.json`), the batch it resumes (`resume-reference.json`) and the batches in its `run.json` dependencies, repeated down the chain. A dependency that is missing or unusable counts as a failure. Use it before resuming or restoring a resume chain. `--verify-all` checks every batch in the project; batches without archives, such as previews, are reported as empty, not failed.
+
+`--json` writes one JSON document to stdout and sends progress text to stderr. The report has `schema_version` 1 and lists each batch's `run_id`, whether it was `requested` or a dependency (`dependency_of`), its `run.json` status, a `result` (`verified`, `empty`, `failed` or `missing`) and each artifact with its status and an English `detail` when it fails. It contains run IDs and file names only, never absolute paths. The exit status is 1 when any batch failed or is missing.
+
 ### Reuse a saved SOURCE
 
 ```bash

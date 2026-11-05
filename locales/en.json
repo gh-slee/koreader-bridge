@@ -376,7 +376,7 @@
     "recovery.runtime_error": "KOReader: {detail}",
     "value.true": "True",
     "value.false": "False",
-    "help.verify_run": "Verify one saved batch's archives against their manifests, read-only and without connecting a Kobo.",
+    "help.verify_run": "Verify a saved batch's archives against their manifests, read-only and without connecting a Kobo. Repeat to verify several batches.",
     "argument.verify_settings": "--verify-run only reads a saved batch; only --backup-dir and --locale may customize it",
     "verify.heading": "BACKUP VERIFICATION (read-only): {run_id}",
     "verify.running": "This batch is still marked running; its archives may be incomplete.",
@@ -450,6 +450,14 @@
     "resume.rolled_back": "Resume failed; automatic rollback restored the original pre-migration TARGET state. Target left connected for inspection.",
     "catalog.resumed_by": "    resumed by {run_id}",
     "error.resume_chain": "The resume history for this run is invalid, so it cannot be used.",
-    "error.restore_superseded": "Run {run_id} was resumed by run {other}; restore run {other} instead."
+    "error.restore_superseded": "Run {run_id} was resumed by run {other}; restore run {other} instead.",
+    "help.verify_all": "Verify every saved batch in this project, read-only and without connecting a Kobo.",
+    "help.with_dependencies": "With --verify-run or --verify-all, also verify the batches each one depends on (saved SOURCE, resumed and restored batches).",
+    "help.json": "With --verify-run or --verify-all, print a machine-readable JSON report to stdout; progress goes to stderr.",
+    "argument.verify_options": "--with-dependencies and --json can only be used with --verify-run or --verify-all",
+    "verify.dependency_heading": "BACKUP VERIFICATION (read-only): {run_id}, needed by {parent}",
+    "verify.missing_dependency": "FAILED: batch {run_id}, needed by {parent}, is missing or cannot be used.",
+    "verify.overall": "All verification finished: {runs} batches checked, {failed} with problems. Nothing was changed.",
+    "verify.no_runs": "No saved batches found in this project."
   }
 }
