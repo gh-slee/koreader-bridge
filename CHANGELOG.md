@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0-dev.7: read-only resume preview
+
+- Add `--resume-run RUN_ID --dry-run` (KM-002 slice 2). It accepts only `needs-recovery` migration and saved-source batches that changed TARGET and stopped while replacing KOReader, copying, writing the result, ejecting or rolling back. A batch already resumed by a newer run is refused.
+- Before connecting the reader, the preview re-verifies the SOURCE archives along the saved-source chain and the original TARGET backups, and checks the saved plan against the source manifest. It then requires the same TARGET fingerprint and confirmed model, and does not trust the journal: the runtime is checked file by file with the expected device identity, and every planned file is hashed and classified as verified, remaining, partly written or drifted. Any drift refuses the resume.
+- The new batch writes `resume-plan.json` and `resume-reference.json`, lists the interrupted batch as a dependency so cleanup protects it, and ends as `audited`. Device IDs are never written to the plan. Without `--dry-run` the command is refused; resume writes are a later slice. Catalog the new text in three locales.
+
 ## 1.1.0-dev.6: resumable change journal
 
 - Write `target-changes.json` as schema 2, the first step toward resuming interrupted transfers (KM-002). `touched` and `created_dirs` keep their meaning. The new `completed` list records each library file after its post-write hash check, and `runtime` records FULL/KOREADER replacement progress (`pending`, `removing`, `extracting`, `verified`, `identity-applied`). Both are hints for a future resume, which will rehash before trusting them.
