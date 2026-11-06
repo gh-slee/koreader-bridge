@@ -1,6 +1,6 @@
 # Resume interrupted transfer: design (KM-002)
 
-Status: **Accepted design; implementation in progress.** The owner accepted the four [decisions](#decisions) on 2026-11-03. Slice 1 (journal schema 2 and runtime markers) is implemented in 1.1.0-dev.6; resume itself is not. This document does not authorize device access.
+Status: **Accepted design; implementation in progress.** The owner accepted the four [decisions](#decisions) on 2026-11-03. Slice 1 (journal schema 2 and runtime markers) is implemented in 1.1.0-dev.6, and slice 2 (the read-only `--resume-run --dry-run` planner) in 1.1.0-dev.7. Resume writes are not implemented. This document does not authorize device access.
 
 Related: [TRACKER.md](../TRACKER.md) (KM-002), [recovery guide](RECOVERY.md), [development guide](DEVELOPMENT.md).
 
@@ -60,7 +60,7 @@ python3 koreader-bridge.py --resume-run RUN_ID
 A batch can be resumed only when all of these hold:
 
 1. `run.json` has `status: needs-recovery` and `target_modified: true`, and `operation` is `migration`, `saved-source` or `resume-migration`.
-2. `phase` is one of `replacing-koreader`, `copying-library`, `writing-result` or `rolling-back`.
+2. `phase` is one of `replacing-koreader`, `copying-library`, `writing-result`, `ejecting-target` or `rolling-back`. A batch interrupted while ejecting has finished its writes, so resume only verifies it.
 3. `target-snapshot.json`, `target-changes.json` and the scan report with a `plan` exist and pass the existing schema checks. Every `touched` path is in `planned_paths`.
 4. No other batch already resumes it with status `success`, `running` or `needs-recovery`. Only the newest unfinished link in a chain is resumable, which keeps the chain linear.
 5. For FULL/KOREADER with `had_koreader: true`, the TARGET pre-migration runtime archive exists.
@@ -91,7 +91,7 @@ Runtime action rules:
 | Recorded phase | Check at resume | Action |
 | --- | --- | --- |
 | `replacing-koreader` | None needed; the tree state is unknown | **Replace**: remove `.adds/koreader`, extract the verified source runtime, remove stale caches and macOS metadata, verify against the source manifest, apply identity |
-| `copying-library`, `writing-result`, `rolling-back` | Every source-manifest file except `settings.reader.lua` matches by size and SHA-256, and `settings.reader.lua` exists with the expected identity | **Keep** when the check passes, otherwise **Replace** |
+| `copying-library`, `writing-result`, `ejecting-target`, `rolling-back` | Every source-manifest file except `settings.reader.lua` matches by size and SHA-256, and `settings.reader.lua` exists with the expected identity | **Keep** when the check passes, otherwise **Replace** |
 
 Expected identity in `settings.reader.lua`:
 
@@ -116,9 +116,9 @@ Resume rebuilds the expected state of every path in the original plan's `copy` s
 | Present with other bytes | Yes | `partial` | Overwrite (expected after an interrupted write) |
 | Present with other bytes, or absent where it existed before | No | `drifted` | **Refuse resume** and name the path |
 
-- `skip`, `conflicts_kept` and `metadata_skipped` paths stay out of the write set, as in the original plan. A `keep-target` conflict whose TARGET bytes changed since planning is reported as drift.
+- `skip`, `conflicts_kept` and `metadata_skipped` paths stay out of the write set, as in the original plan. `skip` paths (identical at planning) must still match the planned source bytes, or they count as drift. `keep-target` conflict paths must still exist as files; their bytes were never captured, so they are not rehashed.
 - Paths outside the original plan are never written or deleted. Target-only books stay retained.
-- The case-collision and symlink checks from `plan_payload` and `checked_path` run again on every path.
+- The path and symlink checks from `checked_path` run again on every path. Case-collision checks run again at write time, as in a migration.
 - `verified` is always decided by hashing current TARGET bytes. A journal entry alone never causes a skip.
 
 Drift means TARGET changed in a way the batch did not cause, for example a book replaced on the device after the interruption. The safe choices are then `--restore-run` or a new migration. Resume does not merge.
@@ -168,7 +168,7 @@ All tests use disposable temporary fixtures and the existing synthetic Kobo layo
 
 - Interrupt hooks that raise a test-only `BaseException` subclass skip the normal rollback, which leaves a realistic `running` batch for reconciliation. Cover these points: during runtime removal, during runtime extraction, after runtime verification and before identity, between library files, mid-file (truncated write) and during automatic rollback.
 - Resume each case to `success`. Check the final TARGET against a migration that was never interrupted: every planned file, runtime manifest, identity mode and retained target-only files.
-- Refusals: wrong reader, same reader as SOURCE, tampered source ZIP or member, tampered TARGET backup, drift on an untouched path, drift on a `keep-target` path, ineligible statuses, resuming a superseded link, cycles in the source chain.
+- Refusals: wrong reader, same reader as SOURCE, tampered source ZIP or member, tampered TARGET backup, drift on an untouched path, a missing `keep-target` path, drift on an identical `skip` path, ineligible statuses, resuming a superseded link, cycles in the source chain.
 - Restore after one and after two resumes returns the exact pre-migration TARGET. Restoring a superseded link is refused.
 - Runtime changed after interruption: simulate a boot by editing `settings.reader.lua`/`history.lua` after `copying-library`, and confirm the plan reports it and replaces only after confirmation.
 - `--dry-run` writes nothing to TARGET or to earlier batches.
@@ -181,7 +181,7 @@ Physical acceptance stays separate: a controlled interruption on a reader the ow
 ## Implementation slices
 
 1. **Journal v2 and runtime markers** (implemented in 1.1.0-dev.6). Migration and restore write schema 2 through the shared writer, with no behavior change. Runtime markers are written for migration batches only, since restore batches are not resumable. Restore reads schema 1 and 2 and refuses any other version before connecting a reader. Cleanup does not read the journal.
-2. **Resume planner (read-only).** `--resume-run --dry-run`: eligibility, chain, source/backup verification, identity, runtime check, library classification, `resume-plan.json`.
+2. **Resume planner (read-only)** (implemented in 1.1.0-dev.7). `--resume-run --dry-run`: eligibility, chain, source/backup verification, identity, runtime check, library classification, `resume-plan.json`.
 3. **Resume writer.** Runtime action, library copy, chain-aware automatic rollback, final status.
 4. **Chain-aware restore and cleanup.** `--restore-run` across resume chains, superseded-link refusal, `--list-runs` display, cleanup dependencies.
 5. **Docs and locales.** USAGE, RECOVERY, TROUBLESHOOTING, three catalogs, ACCEPTANCE entry, version bump.

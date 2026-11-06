@@ -235,13 +235,14 @@ Use `--help` for the definitive help text.
 | `--restore-run RUN_ID` | Restore the recorded original TARGET state. |
 | `--list-runs` | Show saved batches/status without devices. |
 | `--verify-run RUN_ID` | Read-only integrity check of one saved batch's archives; no device. |
+| `--resume-run RUN_ID` | Preview resuming an interrupted `needs-recovery` migration. Currently requires `--dry-run` and never writes to TARGET. |
 | `--cleanup` | Preview eligible old batches; no deletion by itself. |
 | `--keep-successful N` | Keep N newest successes during cleanup, minimum 1. |
 | `--delete-run RUN_ID` | Explicit eligible deletion selection with `--cleanup`; repeatable. |
 | `--self-test` | Small offline non-destructive self-test, then exit. |
 | `--version`, `--help` | Show version/help, then exit. |
 
-`--preview-ui`, `--list-locales`, `--from-run`, `--restore-run`, `--list-runs`, `--verify-run` and `--cleanup` are mutually exclusive operations. The main migration workflow is interactive; there is no unattended `--yes` switch.
+`--preview-ui`, `--list-locales`, `--from-run`, `--restore-run`, `--list-runs`, `--verify-run`, `--resume-run` and `--cleanup` are mutually exclusive operations. The main migration workflow is interactive; there is no unattended `--yes` switch.
 
 ## FAQ
 
