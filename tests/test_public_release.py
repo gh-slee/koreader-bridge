@@ -194,6 +194,19 @@ class PublicationTests(unittest.TestCase):
                      'docs/../AGENTS.override.md'):
             self.assertTrue(guard.inspect_blob(path, b'Synthetic private data.'))
 
+    def test_ticket_allowlist_is_exact_and_still_scans_content(self):
+        for path in ('tickets/README.md', 'tickets/TEMPLATE.md', 'tickets/ROADMAP.md',
+                     'tickets/KM-P0-029.md', 'tickets/KM-P1-037A.md', 'scripts/tickets.py', 'CLAUDE.md'):
+            with self.subTest(path=path):
+                self.assertFalse(guard.inspect_blob(path, b'Synthetic public ticket.'))
+                private_path = '/' + 'Users' + '/example/private-data'
+                self.assertTrue(guard.inspect_blob(path, private_path.encode()))
+        for path in ('tickets/notes.md', 'tickets/KM-P3-001.md', 'tickets/km-p0-001.md',
+                     'tickets/KM-P0-001.json', 'tickets/private/KM-P0-001.md',
+                     'tickets/../AGENTS.override.md', 'work/agent-claim.json'):
+            with self.subTest(path=path):
+                self.assertTrue(guard.inspect_blob(path, b'Synthetic private data.'))
+
     def test_detection_never_echoes_secret_values(self):
         secret = 'gh' + 'p_' + 'a' * 32
         issues = guard.inspect_blob('README.md', ('token: ' + secret).encode())

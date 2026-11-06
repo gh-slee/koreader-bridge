@@ -57,3 +57,20 @@ python3 scripts/check_publication.py --worktree --history
 - Validate the final Markdown with scripts/check_pr_description.py --body-file before submission; pass those exact reviewed bytes with gh pr create/edit --body-file or an explicit API body. Never use commit-message autofill. Replace the complete body after material changes. Handoffs supply actual commands, revisions/results/skips, review provenance and gaps; self-tests are not independent QA. No new agent roles, device authority or approval exceptions are implied.
 - Start fresh sessions in the repository. Use the [session verification prompt](docs/DEVELOPMENT.md#fresh-session-verification); distinguish discovered instructions from explicit reads and static checks from actual session/worktree tests. Verify destination branch and guidance after a worktree transfer.
 - If delegation is requested, give each agent a bounded task and the applicable instructions/context; do not assume every tool inherits the parent's full conversation. Delegation does not broaden permissions.
+
+## Tickets and parallel agents
+
+All planned and in-progress work is tracked in [tickets/](tickets/README.md), one
+Markdown file per ticket; [tickets/ROADMAP.md](tickets/ROADMAP.md) orders it. Several
+agents (any vendor or model) may work at once, one ticket each:
+
+- Find work with `python3 scripts/tickets.py next --tier <any|standard|frontier>`;
+  claim it with `python3 scripts/tickets.py claim <ID> --agent <tool/model> --worktree`
+  and work only in that ticket's worktree and branch. Never take a live claim or a
+  ticket whose resources another live claim holds.
+- Read the ticket's Handoff first. Keep Handoff current, commit and push the ticket
+  branch, and run `heartbeat` at every checkpoint, because a usage limit can stop you
+  at any time. Resume someone else's stale claim with `resume` and `takeover`.
+- Edit only your own ticket file; file new tickets for follow-ups. `gate: owner`
+  tickets need recorded owner approval before work starts. Use the claim's
+  `isolation_id` and `port_base` for Docker, databases and ports.

@@ -2,6 +2,8 @@
 
 Last reconciled: **2026-11-03**. Source snapshot version: **1.1.0-dev.9** (native desktop development; the published 1.0.0 remains a CLI release). [1.0.0-rc.1](https://github.com/gh-slee/koreader-bridge/releases/tag/v1.0.0-rc.1) was published on 2026-10-21 as a pre-release, not Latest. Check the release list for later published assets. Broader physical/manual acceptance remains pending. See [first-stable release gates](ACCEPTANCE.md#first-stable-release-gates) and the [version policy](docs/MAINTAINING.md#versioning-and-first-stable-release).
 
+Agent work items, their order and parallel lanes are tracked as tickets in [tickets/](tickets/README.md) ([roadmap](tickets/ROADMAP.md)). A ticket is `done` when its code is merged; the acceptance status below stays authoritative.
+
 Status vocabulary: `Queued`, `In progress`, `Ready for test`, `Blocked`, `Done`, `Deferred`. KM-011, KM-005, KM-001 and KM-003 are implemented and ready for user testing; ticket-wide human sign-off remains pending despite scoped KOREADER success. Entries represent planned work, not permission to operate physical devices or delete backups.
 
 ## Project identity and supported scope

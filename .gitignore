@@ -76,3 +76,8 @@ dist/
 .build/
 .swiftpm/
 .impeccable/
+
+# Agent ticket claims and worktrees.
+/work/
+# Ticket kit installation input.
+/agent-ticket-kit/

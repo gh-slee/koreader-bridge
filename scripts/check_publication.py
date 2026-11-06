@@ -30,6 +30,7 @@ EXACT.update({
     'docs/MACOS.md', 'docs/DESKTOP_ARCHITECTURE.md',
     'assets/desktop/migration-light.png', 'assets/desktop/migration-dark.png',
     'assets/desktop/backups-light.png',
+    'CLAUDE.md', 'scripts/tickets.py',
 })
 PUBLIC_SCREENSHOTS = {'assets/desktop/migration-light.png', 'assets/desktop/migration-dark.png',
                       'assets/desktop/backups-light.png'}
@@ -53,6 +54,9 @@ def git(*args: str) -> bytes:
 
 def allowed(path: str) -> bool:
     p = PurePosixPath(path)
+    if len(p.parts) == 2 and p.parts[0] == 'tickets':
+        # Ticket backlog: README, TEMPLATE, ROADMAP and <PREFIX>-P<n>-<nnn>.md files.
+        return re.fullmatch(r'(?:README|TEMPLATE|ROADMAP|[A-Z][A-Z0-9]*-P[0-2]-[0-9]{3}[A-Z]?)\.md', p.name) is not None
     return path in EXACT or (len(p.parts) == 2 and p.parts[0] == 'tests'
                             and re.fullmatch(r'test_[a-z0-9_]+\.py', p.name) is not None)
 
