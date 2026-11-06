@@ -253,6 +253,17 @@ Status: KM-014/KM-015/KM-016 Ready for test. Complete the implementation and run
 - Expect safe English bootstrap diagnostics when catalogs cannot load, original Python-generated argparse/traceback messages, technical tokens and raw external diagnostics. These are deliberate boundaries, not unreviewed translation gaps.
 - Finish the existing mode, difference, saved-source, exact-restore, cleanup-preview and package checklists using the final reviewed build. Record human results together and retain recovery backups until sign-off.
 
+## KM-002: resume interrupted transfer (1.1.0-dev.8)
+
+Status: Ready for test. Synthetic fixtures cover every case below; no physical reader has been interrupted. Interrupting a real migration needs a TARGET you are willing to have replaced and its own explicit authorization.
+
+- On a disposable synthetic project, or a controlled reader authorized for replacement, interrupt a FULL migration during the library copy (for example, unplug the reader). The batch should end as `needs-recovery`.
+- Run `--resume-run <run-id> --dry-run`. Check that it reconnects only TARGET, keeps a verified runtime, lists verified, remaining and partly written files in `resume-plan.json`, and changes nothing on the reader.
+- Run `--resume-run <run-id>`. After the default-No confirmation, the reader should match an uninterrupted FULL migration: books, sidecars, fonts, runtime and preserved device identity. Open KOReader and confirm a book's progress.
+- Edit one not-yet-copied book on the reader before resuming; resume should refuse and name the path.
+- Restore the resume batch with `--restore-run`; TARGET should return to its pre-migration state. Restoring the original batch should be refused and point to the resume batch. `--list-runs` should show `resumed by`.
+- Read the new prompts and messages in zh-Hant and zh-Hans.
+
 ## KM-007: reading-data conflict report (1.1.0-dev.5)
 
 Status: Ready for test. Start with LIBRARY or FULL previews (`--dry-run`); the report never writes to either reader. Physical-reader runs need their own explicit scope.

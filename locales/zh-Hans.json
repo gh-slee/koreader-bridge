@@ -418,12 +418,11 @@
     "reading_data.flag_target_annotations_replaced": "TARGET 的批注将被替换",
     "reading_data.flag_target_kept": "SOURCE 的阅读数据不会复制（保留 TARGET）",
     "reading_data.flag_retained_for_different_book": "书籍会被替换，但 TARGET 的元数据保持不变",
-    "help.resume_run": "预览如何续传先前批次中中断、需要恢复 (needs-recovery) 的迁移（必须搭配 --dry-run；不写入目标 (TARGET)）。",
+    "help.resume_run": "续传先前批次中中断、需要恢复 (needs-recovery) 的迁移；加上 --dry-run 可预览，不写入目标 (TARGET)。",
     "argument.resume_settings": "--resume-run 会沿用已保存的计划；只能搭配 --dry-run、--target-model、--backup-dir 与 --locale。",
-    "argument.resume_dry_run_only": "--resume-run 目前必须搭配 --dry-run；续传时写入目标 (TARGET) 的功能尚未实现。",
     "prompt.resume_target": "请连接中断的目标 (TARGET)（{model}），然后按 Return…",
     "resume.heading": "续传预览，批次 {run_id}：{model}",
-    "resume.scope": "按已保存的计划检查归档、原始目标 (TARGET) 备份与当前的目标文件。不会更改 Kobo 上的任何内容。",
+    "resume.scope": "在任何更改之前，按已保存的计划检查归档、原始目标 (TARGET) 备份与当前的目标文件。--dry-run 预览不会更改 Kobo 上的任何内容。",
     "resume.runtime_none": "KOReader：不在本次迁移范围内。",
     "resume.runtime_keep": "KOReader：完整且验证通过，将保留。",
     "resume.runtime_replace_interrupted": "KOReader：在替换过程中中断，将从已验证的来源归档重新替换。",
@@ -442,6 +441,14 @@
     "error.resume_plan_mismatch": "已保存的计划条目与来源归档清单不符：{path}",
     "error.resume_backup_incomplete": "原始目标 (TARGET) 备份未包含计划要覆盖的所有文件。",
     "error.resume_target_model": "--target-model 与此批次记录的目标 (TARGET) 型号不符。",
-    "error.resume_drift": "已拒绝续传：目标 (TARGET) 有 {count} 个路径在本次迁移之外被更改。请用 --restore-run 还原，或重新迁移。"
+    "error.resume_drift": "已拒绝续传：目标 (TARGET) 有 {count} 个路径在本次迁移之外被更改。请用 --restore-run 还原，或重新迁移。",
+    "resume.final_plan": "最终续传计划：替换 KOReader：{runtime}；需写入的书库文件：{count}。已验证的文件会保留。",
+    "confirm.resume": "要继续续传本次迁移吗？",
+    "cancel.resume": "已取消续传。此批次未修改任何目标 (TARGET) 文件。目标已安全退出；备份仍保留。",
+    "resume.success": "续传成功。结果：{path}",
+    "resume.rolled_back": "续传失败；自动恢复已还原迁移前的原始目标 (TARGET) 状态。目标保持连接以供检查。",
+    "catalog.resumed_by": "    已由 {run_id} 续传",
+    "error.resume_chain": "此批次的续传记录无效，无法使用。",
+    "error.restore_superseded": "批次 {run_id} 已由批次 {other} 续传；请改为还原批次 {other}。"
   }
 }

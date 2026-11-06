@@ -22,13 +22,15 @@ class ResumePlannerTests(base.MigrationTestCase):
         super().setUp()
         self.project = self.root / 'project'
 
-    def resume(self, devices, *flags, run_id=None):
-        argv = ['tool', '--backup-dir', str(self.project), '--resume-run', run_id or self.batch.name, '--dry-run', *flags]
+    def resume(self, devices, *flags, run_id=None, dry_run=True, answers=None):
+        argv = ['tool', '--backup-dir', str(self.project), '--resume-run', run_id or self.batch.name,
+                *(['--dry-run'] if dry_run else []), *flags]
+        prompts = {'side_effect': answers} if answers is not None else {'return_value': True}
         with mock.patch('sys.argv', argv), mock.patch.object(m, 'require_macos_tools'), \
                 mock.patch.object(m, 'run_with_spinner', side_effect=base.fake_ditto), \
                 mock.patch.object(m, 'wait_for_single_kobo', side_effect=devices) as wait, \
                 mock.patch.object(m, 'safe_eject'), \
-                mock.patch.object(m, 'prompt_yes_no', return_value=True), \
+                mock.patch.object(m, 'prompt_yes_no', **prompts), \
                 mock.patch('builtins.input', return_value=''):
             try:
                 return m.main(), wait.call_count
@@ -181,10 +183,10 @@ class ResumePlannerTests(base.MigrationTestCase):
         with self.assertRaisesRegex(m.MigrationError, 'already resumed'):
             self.resume([target])
 
-    def test_cli_requires_dry_run_and_rejects_scope_options(self):
+    def test_cli_rejects_scope_options(self):
         runs_before = set((self.project / 'runs').glob('*')) if (self.project / 'runs').exists() else set()
-        for flags in (['--resume-run', 'x'], ['--resume-run', 'x', '--dry-run', '--mode', 'full'],
-                      ['--resume-run', 'x', '--dry-run', '--no-reading-data']):
+        for flags in (['--resume-run', 'x', '--mode', 'full'], ['--resume-run', 'x', '--dry-run', '--books'],
+                      ['--resume-run', 'x', '--no-reading-data'], ['--resume-run', 'x', '--source-model', 'Kobo Clara 2E']):
             argv = ['tool', '--backup-dir', str(self.project), *flags]
             with self.subTest(flags=flags), mock.patch('sys.argv', argv), \
                     contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

@@ -1,6 +1,6 @@
 # Resume interrupted transfer: design (KM-002)
 
-Status: **Accepted design; implementation in progress.** The owner accepted the four [decisions](#decisions) on 2026-11-03. Slice 1 (journal schema 2 and runtime markers) is implemented in 1.1.0-dev.6, and slice 2 (the read-only `--resume-run --dry-run` planner) in 1.1.0-dev.7. Resume writes are not implemented. This document does not authorize device access.
+Status: **Accepted design; implementation in progress.** The owner accepted the four [decisions](#decisions) on 2026-11-03. Slice 1 (journal schema 2 and runtime markers) is implemented in 1.1.0-dev.6, slice 2 (the read-only `--resume-run --dry-run` planner) in 1.1.0-dev.7, and slices 3-4 (resume writes, chain-aware rollback and restore, `--list-runs` display) in 1.1.0-dev.8. Slice 5's catalog and docs work shipped with each slice; desktop support (slice 6) is not implemented. This document does not authorize device access.
 
 Related: [TRACKER.md](../TRACKER.md) (KM-002), [recovery guide](RECOVERY.md), [development guide](DEVELOPMENT.md).
 
@@ -182,8 +182,8 @@ Physical acceptance stays separate: a controlled interruption on a reader the ow
 
 1. **Journal v2 and runtime markers** (implemented in 1.1.0-dev.6). Migration and restore write schema 2 through the shared writer, with no behavior change. Runtime markers are written for migration batches only, since restore batches are not resumable. Restore reads schema 1 and 2 and refuses any other version before connecting a reader. Cleanup does not read the journal.
 2. **Resume planner (read-only)** (implemented in 1.1.0-dev.7). `--resume-run --dry-run`: eligibility, chain, source/backup verification, identity, runtime check, library classification, `resume-plan.json`.
-3. **Resume writer.** Runtime action, library copy, chain-aware automatic rollback, final status.
-4. **Chain-aware restore and cleanup.** `--restore-run` across resume chains, superseded-link refusal, `--list-runs` display, cleanup dependencies.
+3. **Resume writer** (implemented in 1.1.0-dev.8). Runtime action, library copy, chain-aware automatic rollback, final status.
+4. **Chain-aware restore and cleanup** (implemented in 1.1.0-dev.8, together with slice 3 so resume writes never ship without a matching restore). `--restore-run` across resume chains, superseded-link refusal, `--list-runs` display, cleanup dependencies.
 5. **Docs and locales.** USAGE, RECOVERY, TROUBLESHOOTING, three catalogs, ACCEPTANCE entry, version bump.
 6. **Desktop (later, separately scoped).** A typed `resume_run` request from a catalog run ID, a Backups-page action and a request-scoped review sheet.
 

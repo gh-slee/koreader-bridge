@@ -26,7 +26,8 @@ runs/                    private; ignored by Git
     difference.txt / difference.json
     source-snapshot.json or source-reference.json
     target-snapshot.json / target-changes.json
-    resume-plan.json / resume-reference.json   resume previews only
+    resume-plan.json / resume-reference.json   resume batches
+    koreader-before-resume.zip                 only when a used runtime is replaced
     *.zip / *.manifest.json
     koreader-migration-result-<run-id>.json
 .project.lock             persistent lock inode; ignored by Git
@@ -123,17 +124,28 @@ Exact restoration requires v3.1+ `target-snapshot.json`, `target-changes.json`, 
 
 Restore cannot be combined with migration scope/model/conflict flags. Only the recorded state, `--dry-run` and `--backup-dir` control it. This is not an automatic interrupted-run resume feature.
 
-### Preview resuming an interrupted migration
+### Resume an interrupted migration
 
-From 1.1.0-dev.7 you can check whether an interrupted migration could continue forward instead of being restored:
+From 1.1.0-dev.8 an interrupted migration can continue forward instead of being restored. Preview first:
 
 ```bash
 python3 koreader-bridge.py --resume-run RUN_ID --dry-run
+python3 koreader-bridge.py --resume-run RUN_ID
 ```
 
 Only a migration or saved-source batch with status `needs-recovery` that changed TARGET qualifies. It must have stopped while replacing KOReader, copying the library, writing the result, ejecting or rolling back. The preview re-verifies the SOURCE archives and the original TARGET backups, asks for the same reader (fingerprint and model), and compares every planned file on TARGET by hash. `resume-plan.json` in the new batch says whether the KOReader runtime would be kept or replaced, and lists files as verified, remaining, partly written or changed outside the migration. Any file changed outside the migration refuses the resume; use `--restore-run` or start a new migration instead.
 
-The preview never writes to the Kobo, and the new batch ends as `audited`. It records the interrupted batch as a dependency, so cleanup keeps it. Resuming writes is not implemented yet, so the command refuses to run without `--dry-run`. See the [resume design](RESUME_DESIGN.md) for the planned behavior.
+The preview never writes to the Kobo, and its batch ends as `audited`. Without `--dry-run` the same checks run, then a final confirmation that defaults to No. Resume then:
+
+- replaces the KOReader runtime only when the plan says so, first saving `koreader-before-resume.zip` in the new batch if the reader was probably used after the interruption;
+- copies only remaining and partly written files, and keeps files already verified;
+- writes its own `target-changes.json` and result file, and ends as `success`.
+
+If resume fails after it starts writing, it rolls TARGET back to the **original pre-migration state** captured by the first batch, not to the interrupted state, and ends as `rolled-back`. A resume that is itself interrupted becomes `needs-recovery` and can be resumed again. Run `--resume-run` on the newest batch: older batches in the chain are refused.
+
+Each resume batch records the batch it continues in `resume-reference.json` and lists every earlier batch as a dependency, so cleanup keeps them. `--list-runs` shows `resumed by <run-id>` under a batch that a newer resume continues.
+
+To undo a resumed migration, restore the **newest** batch in the chain. `--restore-run` follows the chain back to the first batch, uses its TARGET backups and combines every batch's change journal, so TARGET returns to its original pre-migration state. Restoring an older batch in the chain is refused with the run to use instead. See the [resume design](RESUME_DESIGN.md) for the rules.
 
 ## Backup cleanup
 
