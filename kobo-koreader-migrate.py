@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 PROJECT_NAME = "KOReader Bridge"
-VERSION = "1.1.0-dev.8"
+VERSION = "1.1.0-dev.9"
 DEFAULT_BACKUP_DIR = Path(__file__).resolve().parent
 VOLUME_ROOT = Path("/Volumes")
 
@@ -128,6 +128,9 @@ LOCALE_REQUIRED_IDS = frozenset({
     'help.source_model',
     'help.target_model',
     'help.verify_run',
+    'help.verify_all',
+    'help.with_dependencies',
+    'help.json',
     'help.resume_run',
     'help.version',
     'mode.audit',
@@ -419,6 +422,8 @@ UI_MESSAGE_FIELDS = {
     'cleanup.cancelled': set(), 'cleanup.deleted': {'run_id'},
     'verify.heading': {'run_id'}, 'verify.running': set(), 'verify.empty': set(),
     'verify.passed': {'name', 'kind'}, 'verify.failed': {'name', 'detail'},
+    'verify.dependency_heading': {'run_id', 'parent'}, 'verify.missing_dependency': {'run_id', 'parent'},
+    'verify.overall': {'runs', 'failed'}, 'verify.no_runs': set(),
     'verify.summary': {'verified', 'failed'},
     'difference.title': set(), 'difference.retain': set(),
     'difference.section': {'label', 'count', 'size'}, 'difference.paths': {'path'},
@@ -723,6 +728,7 @@ UI_MESSAGE_FIELDS = {
     'argument.preview_settings': set(),
     'argument.verify_settings': set(),
     'argument.resume_settings': set(),
+    'argument.verify_options': set(),
     'lock.project': set(),
     'lock.device': set(),
     'diagnostic.join': {'first', 'second'},
@@ -2124,11 +2130,14 @@ def parse_args() -> argparse.Namespace:
     operations.add_argument('--from-run', metavar='RUN_ID', help=bundle.render('help.from_run'))
     operations.add_argument('--restore-run', metavar='RUN_ID', help=bundle.render('help.restore_run'))
     operations.add_argument('--list-runs', action='store_true', help=bundle.render('help.list_runs'))
-    operations.add_argument('--verify-run', metavar='RUN_ID', help=bundle.render('help.verify_run'))
+    operations.add_argument('--verify-run', metavar='RUN_ID', action='append', help=bundle.render('help.verify_run'))
+    operations.add_argument('--verify-all', action='store_true', help=bundle.render('help.verify_all'))
     operations.add_argument('--resume-run', metavar='RUN_ID', help=bundle.render('help.resume_run'))
     operations.add_argument('--cleanup', action='store_true', help=bundle.render('help.cleanup'))
     parser.add_argument('--keep-successful', type=int, default=2, help=bundle.render('help.keep_successful'))
     parser.add_argument('--delete-run', action='append', default=[], metavar='RUN_ID', help=bundle.render('help.delete_run'))
+    parser.add_argument('--with-dependencies', action='store_true', help=bundle.render('help.with_dependencies'))
+    parser.add_argument('--json', action='store_true', help=bundle.render('help.json'))
     parser.add_argument('--self-test', action='store_true', help=bundle.render('help.self_test'))
     parser.add_argument('--version', action='version', version=f'%(prog)s {VERSION}', help=bundle.render('help.version'))
     args = parser.parse_args()
@@ -2139,7 +2148,10 @@ def parse_args() -> argparse.Namespace:
     if args.restore_run and (args.source_model or args.target_model or args.mode or args.books is not None or args.fonts is not None or args.conflict
                             or args.include_dir or args.exclude_dir or args.extra_extension or not args.reading_data):
         parser.error(bundle.render('argument.restore_settings'))
-    if args.verify_run and (args.dry_run or args.mode or args.self_test or args.books is not None or args.fonts is not None
+    verifying = bool(args.verify_run or args.verify_all)
+    if (args.with_dependencies or args.json) and not verifying:
+        parser.error(bundle.render('argument.verify_options'))
+    if verifying and (args.dry_run or args.mode or args.self_test or args.books is not None or args.fonts is not None
             or args.source_model or args.target_model or args.conflict or args.include_dir or args.exclude_dir
             or args.extra_extension or not args.reading_data or args.delete_run):
         parser.error(bundle.render('argument.verify_settings'))
@@ -2420,27 +2432,121 @@ def verify_run_artifacts(run: Path) -> List[dict]:
     return results
 
 
-def verify_run_command(project: Path, reference: str) -> int:
-    run = resolve_saved_run(project, reference)
-    ui_emit('verify.heading', run_id=run.name)
+def run_dependency_names(run: Path) -> List[str]:
+    """Batches this run relies on: run.json dependencies plus source/resume references."""
+    names = []
     try:
-        status = read_json(run / 'run.json').get('status') if (run / 'run.json').is_file() else None
+        state = read_json(run / 'run.json') if (run / 'run.json').is_file() else {}
     except MigrationError:
-        status = None
-    if status == 'running':
-        ui_emit('verify.running', severity='warning')
-    results = verify_run_artifacts(run)
-    if not results:
-        ui_emit('verify.empty')
-    for result in results:
-        if result['status'] == 'verified':
-            ui_emit('verify.passed', name=result['name'], kind=result['kind'])
+        state = {}
+    dependencies = state.get('dependencies', [])
+    if isinstance(dependencies, list):
+        names += [name for name in dependencies if isinstance(name, str)]
+    for reference in ('source-reference.json', 'resume-reference.json'):
+        path = run / reference
+        if path.is_file() and not path.is_symlink():
+            try:
+                value = read_json(path).get('run_id')
+            except MigrationError:
+                value = None
+            if isinstance(value, str):
+                names.append(value)
+    return [name for name in dict.fromkeys(names) if name != run.name]
+
+
+def verify_runs(project: Path, references: List[str], verify_all: bool = False,
+                with_dependencies: bool = False) -> List[dict]:
+    """Read-only verification of several batches; requested names must resolve, dependencies may be missing."""
+    if verify_all:
+        requested = [record['run_id'] for record in run_catalog(project)]
+    else:
+        requested = list(dict.fromkeys(references))
+        for name in requested:
+            resolve_saved_run(project, name)
+    entries, queue = {}, [(name, None) for name in requested]
+    while queue:
+        name, parent = queue.pop(0)
+        if name in entries:
+            if parent and parent not in entries[name]['dependency_of']:
+                entries[name]['dependency_of'].append(parent)
+            continue
+        entry = {'run_id': name, 'requested': parent is None, 'dependency_of': [parent] if parent else [],
+                 'status': None, 'result': None, 'detail': None, 'artifacts': []}
+        entries[name] = entry
+        if parent:
+            ui_emit('verify.dependency_heading', run_id=name, parent=parent)
         else:
-            ui_emit('verify.failed', name=result['name'], detail=result['detail'], severity='error')
-    failed = sum(r['status'] == 'failed' for r in results)
-    ui_emit('verify.summary', verified=len(results) - failed, failed=failed,
-            severity='error' if failed else 'info')
-    return 1 if failed else 0
+            ui_emit('verify.heading', run_id=name)
+        try:
+            run = resolve_saved_run(project, name)
+        except MigrationError as exc:
+            entry.update(result='missing', detail=str(exception_detail(exc)))
+            ui_emit('verify.missing_dependency', run_id=name, parent=parent or '', severity='error')
+            continue
+        try:
+            entry['status'] = read_json(run / 'run.json').get('status') if (run / 'run.json').is_file() else None
+        except MigrationError:
+            entry['status'] = 'unreadable'
+        if entry['status'] == 'running':
+            ui_emit('verify.running', severity='warning')
+        try:
+            results = verify_run_artifacts(run)
+        except MigrationError as exc:
+            results = [{'name': name, 'kind': None, 'status': 'failed', 'detail': exception_detail(exc)}]
+        if not results:
+            ui_emit('verify.empty')
+        for result in results:
+            if result['status'] == 'verified':
+                ui_emit('verify.passed', name=result['name'], kind=result['kind'])
+            else:
+                ui_emit('verify.failed', name=result['name'], detail=result['detail'], severity='error')
+        failed = sum(r['status'] == 'failed' for r in results)
+        ui_emit('verify.summary', verified=len(results) - failed, failed=failed,
+                severity='error' if failed else 'info')
+        entry['artifacts'] = [{'name': r['name'], 'kind': r['kind'], 'status': r['status'],
+                               **({'detail': str(r['detail'])} if r['status'] != 'verified' else {})}
+                              for r in results]
+        entry['result'] = 'failed' if failed else 'verified' if results else 'empty'
+        if with_dependencies:
+            queue += [(dependency, name) for dependency in run_dependency_names(run)]
+    return list(entries.values())
+
+
+def verify_report(entries: List[dict]) -> dict:
+    """Stable English machine report; run IDs only, never absolute paths."""
+    artifacts = [artifact for entry in entries for artifact in entry['artifacts']]
+    return {'schema_version': 1, 'tool_version': VERSION, 'operation': 'verify-runs', 'runs': entries,
+            'summary': {'runs': len(entries),
+                        **{result: sum(entry['result'] == result for entry in entries)
+                           for result in ('verified', 'empty', 'failed', 'missing')},
+                        'artifacts_verified': sum(a['status'] == 'verified' for a in artifacts),
+                        'artifacts_failed': sum(a['status'] != 'verified' for a in artifacts)}}
+
+
+def verify_runs_command(project: Path, references: List[str], verify_all: bool = False,
+                        with_dependencies: bool = False, as_json: bool = False) -> int:
+    if as_json:
+        # Human progress goes to stderr so stdout stays one JSON document.
+        stdout = sys.stdout
+        with ui_session(current_ui().bundle, stdout=sys.stderr, stderr=sys.stderr):
+            entries = verify_runs(project, references, verify_all, with_dependencies)
+        report = verify_report(entries)
+        stdout.write(json.dumps(report, indent=2, ensure_ascii=True) + '\n')
+        stdout.flush()
+    else:
+        entries = verify_runs(project, references, verify_all, with_dependencies)
+        report = verify_report(entries)
+        if verify_all and not entries:
+            ui_emit('verify.no_runs')
+        elif len(entries) > 1:
+            bad = report['summary']['failed'] + report['summary']['missing']
+            ui_emit('verify.overall', runs=len(entries), failed=bad, severity='error' if bad else 'info')
+    summary = report['summary']
+    return 1 if summary['failed'] or summary['missing'] else 0
+
+
+def verify_run_command(project: Path, reference: str) -> int:
+    return verify_runs_command(project, [reference])
 
 
 def artifact_entry(archive: Optional[Path]) -> Optional[dict]:
@@ -3577,8 +3683,9 @@ def run_main(args) -> int:
     if getattr(args, 'list_runs', False):
         print_catalog(run_catalog(project))
         return 0
-    if getattr(args, 'verify_run', None):
-        return verify_run_command(project, args.verify_run)
+    if getattr(args, 'verify_run', None) or getattr(args, 'verify_all', False):
+        return verify_runs_command(project, args.verify_run or [], args.verify_all,
+                                   args.with_dependencies, args.json)
     if getattr(args, 'cleanup', False):
         return cleanup_command(project, args.keep_successful, [] if args.dry_run else args.delete_run)
     require_macos_tools()

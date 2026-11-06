@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0-dev.9: batch verification extensions
+
+- `--verify-run` can be repeated, and `--verify-all` checks every saved batch in the project. With more than one batch, an overall line reports how many had problems. Single-batch output is unchanged.
+- `--with-dependencies` also verifies the batches each run relies on: saved SOURCE, resumed and restored batches, followed down the chain. A missing dependency fails the check.
+- `--json` prints a stable English report (`schema_version` 1) to stdout with per-batch results and per-artifact status, with run IDs and file names only. Progress text moves to stderr. Exit status is 1 when any batch failed or is missing.
+- An unusable batch folder (for example, one containing a symlink) is now reported as a failed result instead of stopping the whole check.
+
 ## 1.1.0-dev.8: resume interrupted migrations
 
 - `--resume-run RUN_ID` now continues an interrupted migration (KM-002 slices 3-4). After the preview checks and a final confirmation that defaults to No, it replaces the KOReader runtime only when needed and copies only remaining and partly written files. Before replacing a runtime that was probably used after the interruption, it saves and verifies `koreader-before-resume.zip`. `--dry-run` still previews without writes.

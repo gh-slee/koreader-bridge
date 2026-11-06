@@ -375,7 +375,7 @@
     "recovery.runtime_error": "KOReader：{detail}",
     "value.true": "是",
     "value.false": "否",
-    "help.verify_run": "依清單驗證單一已儲存批次的封存檔；唯讀，不需要連接 Kobo。",
+    "help.verify_run": "依清單驗證已儲存批次的封存檔；唯讀，不需要連接 Kobo。可重複指定以驗證多個批次。",
     "argument.verify_settings": "--verify-run 只會讀取已儲存的批次；只能搭配 --backup-dir 與 --locale 調整操作。",
     "verify.heading": "備份驗證（唯讀）：{run_id}",
     "verify.running": "此批次仍標示為執行中；其封存檔可能不完整。",
@@ -449,6 +449,14 @@
     "resume.rolled_back": "續傳失敗；自動復原已還原遷移前的原始目標 (TARGET) 狀態。目標保持連接以供檢查。",
     "catalog.resumed_by": "    已由 {run_id} 續傳",
     "error.resume_chain": "此批次的續傳紀錄無效，無法使用。",
-    "error.restore_superseded": "批次 {run_id} 已由批次 {other} 續傳；請改為還原批次 {other}。"
+    "error.restore_superseded": "批次 {run_id} 已由批次 {other} 續傳；請改為還原批次 {other}。",
+    "help.verify_all": "驗證此專案中所有已儲存的批次；唯讀，不需要連接 Kobo。",
+    "help.with_dependencies": "搭配 --verify-run 或 --verify-all 時，一併驗證各批次所依賴的批次（已儲存的來源 (SOURCE)、續傳與還原的批次）。",
+    "help.json": "搭配 --verify-run 或 --verify-all 時，將機器可讀的 JSON 報告輸出到 stdout；進度訊息輸出到 stderr。",
+    "argument.verify_options": "--with-dependencies 與 --json 只能搭配 --verify-run 或 --verify-all 使用。",
+    "verify.dependency_heading": "備份驗證（唯讀）：{run_id}，為 {parent} 所需",
+    "verify.missing_dependency": "失敗：{parent} 所需的批次 {run_id} 遺失或無法使用。",
+    "verify.overall": "全部驗證完成：檢查了 {runs} 個批次，其中 {failed} 個有問題。未變更任何資料。",
+    "verify.no_runs": "此專案中沒有已儲存的批次。"
   }
 }
