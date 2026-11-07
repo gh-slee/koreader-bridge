@@ -91,6 +91,8 @@ struct Request: Encodable, Sendable {
     var keepSuccessful: Int?
     var fixtureRoot: String?
     var readerSession: String?
+    var withDependencies: Bool?
+    var locale: String?
 }
 struct RunEntry: Decodable, Identifiable, Hashable, Sendable {
     let id: String; let status: String; let operation: String; let bytes: Int64; let endedAt: String
@@ -100,6 +102,24 @@ struct RunEntry: Decodable, Identifiable, Hashable, Sendable {
     var operationText: String { native(["migration": "Migration", "saved-source": "Saved source", "restore-target": "Restore target", "sample": "Sample", "unknown": "Unknown"][operation] ?? operation) }
 }
 struct RunCatalog: Decodable { let runs: [RunEntry]; let reclaimableBytes: Int64 }
+struct VerifiedArtifact: Decodable, Hashable, Sendable {
+    let name: String; let kind: String?; let status: String; let detail: String
+    var kindText: String { native(["payload": "Library archive", "koreader": "KOReader archive", "descriptor": "Snapshot reference"][kind ?? ""] ?? "Unrecognized file") }
+}
+struct VerifiedRun: Decodable, Identifiable, Hashable, Sendable {
+    let id: String; let requested: Bool; let dependencyOf: [String]; let result: String; let detail: String
+    let artifacts: [VerifiedArtifact]
+    var resultText: String { native(["verified": "Verified", "empty": "No archives", "failed": "Problems found", "missing": "Missing batch"][result] ?? result) }
+    var symbol: String { result == "verified" ? "checkmark.seal" : result == "empty" ? "minus.circle" : "exclamationmark.triangle" }
+}
+struct VerifySummary: Decodable, Hashable, Sendable {
+    let runs: Int; let verified: Int; let empty: Int; let failed: Int; let missing: Int
+    let artifactsVerified: Int; let artifactsFailed: Int
+}
+struct VerifyReport: Decodable, Sendable {
+    let runID: String; let withDependencies: Bool; let exitCode: Int; let passed: Bool
+    let runs: [VerifiedRun]; let summary: VerifySummary
+}
 struct ConnectedReaders: Decodable {
     let count: Int
     let modelHint: String?
@@ -225,7 +245,8 @@ final class BackendClient: @unchecked Sendable {
                     payload.append(10)
                     try input.fileHandleForWriting.write(contentsOf: payload)
                     let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
-                    timer.schedule(deadline: .now() + (request.operation == "execute" ? 86400 : 60))
+                    // Verification hashes whole archives, so it may outlast ordinary requests.
+                    timer.schedule(deadline: .now() + (request.operation == "execute" ? 86400 : request.operation == "verify" ? 21600 : 60))
                     timer.setEventHandler { [weak self] in self?.cancel() }
                     timer.resume()
                     defer { timer.cancel() }
@@ -326,6 +347,8 @@ struct PreferenceStore {
     @Published var runs: [RunEntry] = []
     @Published var selectedRun: String?
     @Published var summary: [String: JSONValue] = [:]
+    @Published var verification: VerifyReport?
+    @Published var verifyDependencies = true
     @Published var logs: [String] = []
     @Published var busy = false
     @Published var phase = "Ready"
@@ -475,6 +498,7 @@ struct PreferenceStore {
         } catch { problem = error.localizedDescription }
     }
     func details() async {
+        if verification?.runID != selectedRun { verification = nil }
         guard !busy, let id = selectedRun else { summary = [:]; return }
         busy = true; defer { busy = false }
         do { var req = baseRequest("details"); req.runID = id; summary = try await backend.call(req).object["summary"]?.object ?? [:] }
@@ -563,6 +587,23 @@ struct PreferenceStore {
             let createdID = result.object["runID"]?.string ?? ""
             selectedRun = createdID.isEmpty ? runs.first?.id : createdID
             return exit == 0
+        } catch { problem = error.localizedDescription; phase = "Stopped"; return false }
+    }
+    /// Read-only KM-010 verification of the selected batch; never changes batches.
+    @discardableResult func verifySelected() async -> Bool {
+        guard !busy, let id = selectedRun, runs.contains(where: { $0.id == id }) else { return false }
+        busy = true; logs = []; problem = nil; notice = ""; verification = nil; phase = "Verifying backups…"
+        defer { busy = false }
+        do {
+            let request = Request(operation: "verify", workspace: workspace, runID: id,
+                                  withDependencies: verifyDependencies, locale: config.locale)
+            let result = try await backend.call(request) { [weak self] packet in Task { @MainActor in self?.receive(packet) } }
+            let report = try result.decode(VerifyReport.self)
+            guard report.runID == id else { throw Failure(code: "protocol", message: "Unexpected response from the bundled backend.") }
+            verification = report
+            if report.passed { notice = "Verification passed. No batch was changed."; phase = "Verification passed" }
+            else { problem = "Verification found problems. Keep these batches and review the results."; phase = "Verification found problems" }
+            return true
         } catch { problem = error.localizedDescription; phase = "Stopped"; return false }
     }
     func revealSelected() {
@@ -962,6 +1003,9 @@ struct BackupsView: View {
                                         Text(native("This batch has no reusable source or exact target snapshot. Its recovery files are retained."))
                                             .font(.callout).foregroundStyle(.secondary)
                                     }
+                                    Divider()
+                                    verifyActions(row)
+                                    if let report = model.verification, report.runID == row.id { VerifyResultsView(report: report) }
                                 }
                             }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
@@ -975,6 +1019,16 @@ struct BackupsView: View {
             ActivityView(model: model)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+    private func verifyActions(_ row: RunEntry) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 16) {
+                Button { Task { await model.verifySelected() } } label: { Label(native("Verify backups"), systemImage: "checkmark.shield") }
+                Toggle(native("Include batches it depends on"), isOn: $model.verifyDependencies).toggleStyle(.checkbox)
+            }.disabled(model.busy)
+            Text(native("Read-only check of every archive against its manifest. Nothing is repaired or changed."))
+                .font(.callout).foregroundStyle(.secondary)
+        }
+    }
     private func sourceActions(_ row: RunEntry) -> some View {
         HStack {
             Button(native("Preview saved source")) { model.review(model.config.workflow(action: "reuse", dryRun: true, runID: row.id)) }
@@ -986,6 +1040,45 @@ struct BackupsView: View {
             Button(native("Preview target restore")) { model.review(model.config.workflow(action: "restore", dryRun: true, runID: row.id)) }
             Button(native("Restore target…")) { model.review(model.config.workflow(action: "restore", dryRun: false, runID: row.id)) }
         }.disabled(!row.canRestore || model.busy)
+    }
+}
+struct VerifyResultsView: View {
+    let report: VerifyReport
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(native(report.passed ? "All checked archives match their manifests." : "Some archives or batches have problems. Do not delete these batches; keep other copies if available."),
+                  systemImage: report.passed ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(report.passed ? Color.teal : Color.orange).font(.callout.weight(.semibold))
+            Text(native("Batches: {runs} · Verified: {verified} · No archives: {empty} · Problems: {failed} · Missing: {missing} · Archives verified: {artifacts}",
+                        ["runs": String(report.summary.runs), "verified": String(report.summary.verified), "empty": String(report.summary.empty),
+                         "failed": String(report.summary.failed), "missing": String(report.summary.missing), "artifacts": String(report.summary.artifactsVerified)]))
+                .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+            ForEach(report.runs) { run in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Label(run.resultText, systemImage: run.symbol).foregroundStyle(run.result == "verified" ? Color.primary : run.result == "empty" ? Color.secondary : Color.orange)
+                            .frame(minWidth: 130, alignment: .leading)
+                        Text(run.id).lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(run.id)
+                        Spacer()
+                        if !run.requested {
+                            Text(native("Needed by {batch}", ["batch": run.dependencyOf.joined(separator: ", ")])).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+                    ForEach(run.artifacts.filter { $0.status != "verified" }, id: \.self) { artifact in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(native("{kind}: {name}", ["kind": artifact.kindText, "name": artifact.name])).font(.callout).lineLimit(1).truncationMode(.middle)
+                            if !artifact.detail.isEmpty {
+                                Text(native("Diagnostic detail:") + " " + artifact.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(3)
+                            }
+                        }.padding(.leading, 24)
+                    }
+                    if !run.detail.isEmpty {
+                        Text(native("Diagnostic detail:") + " " + run.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(3).padding(.leading, 24)
+                    }
+                }
+            }
+        }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background((report.passed ? Color.teal : Color.orange).opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 struct SettingsView: View {

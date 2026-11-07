@@ -595,6 +595,8 @@ def verify(m, request, project):
         stream.flush()
     finally:
         sys.argv = old_argv
+    if code == 130:
+        raise KeyboardInterrupt  # Safe stop: report cancellation, not a verification failure.
     text = report.getvalue()
     if len(text.encode()) > MAX_OUTPUT // 2:
         raise ProtocolError("The verification report is too large.")
