@@ -184,7 +184,8 @@ class PublicationTests(unittest.TestCase):
                                   guard.check_history())
 
     def test_documentation_allowlist_is_exact_and_still_scans_content(self):
-        for name in ('USAGE', 'RECOVERY', 'TROUBLESHOOTING', 'DEVELOPMENT', 'MAINTAINING'):
+        for name in ('USAGE', 'RECOVERY', 'TROUBLESHOOTING', 'DEVELOPMENT', 'MAINTAINING',
+                     'RESUME_DESIGN', 'SETTINGS_POLICY_DESIGN'):
             with self.subTest(name=name):
                 path = 'docs/' + name + '.md'
                 self.assertFalse(guard.inspect_blob(path, b'Synthetic public guide.'))
