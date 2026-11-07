@@ -19,7 +19,8 @@ EXACT = {'koreader-bridge.py', 'kobo-koreader-migrate.py', 'README.md', 'LICENSE
          'scripts/prepare_release.py',
          'locales/registry.json', 'locales/en.json', 'locales/zh-Hant.json', 'locales/zh-Hans.json',
          'docs/USAGE.md', 'docs/RECOVERY.md', 'docs/TROUBLESHOOTING.md',
-         'docs/DEVELOPMENT.md', 'docs/MAINTAINING.md', 'docs/RESUME_DESIGN.md'}
+         'docs/DEVELOPMENT.md', 'docs/MAINTAINING.md', 'docs/RESUME_DESIGN.md',
+         'docs/SETTINGS_POLICY_DESIGN.md'}
 EXACT.update({
     'bridge_desktop_helper.py', 'bridge_devices.py', 'PRODUCT.md', 'DESIGN.md',
     'macos/KOReaderBridgeApp.swift', 'macos/NativeChecks.swift', 'macos/Icon.swift',
