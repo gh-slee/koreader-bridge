@@ -30,7 +30,7 @@ By default, the app keeps TARGET identity or creates one if it is missing. KORea
 
 Back up and prepare captures and verifies the required archives automatically. Ready to migrate then shows the selected roles and asks for permission to write. Pressing Return selects Cancel migration. Unknown, conflicting and manually corrected models still need explicit confirmation. Sequential mode, restoration and typed deletion keep their original prompts.
 
-The app verifies source archives before target writes and safely ejects each reader after its phase. Backups lists existing batches. Choose a private existing CLI output folder in Settings to reopen them. Saved-source reuse and exact-target restore use the selected target in connected-reader mode, with the original snapshot identity checks. Cleanup shows protection rules before deletion and requires exact typed confirmation.
+The app verifies source archives before target writes and safely ejects each reader after its phase. Backups lists existing batches. Choose a private existing CLI output folder in Settings to reopen them. Saved-source reuse and exact-target restore use the selected target in connected-reader mode, with the original snapshot identity checks. Verify backups checks the selected batch, and optionally the batches it depends on, with the same read-only verifier as `--verify-run`; it never repairs or changes a batch. Cleanup shows protection rules before deletion and requires exact typed confirmation.
 
 ## Samples, storage and language
 

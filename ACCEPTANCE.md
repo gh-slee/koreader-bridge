@@ -282,6 +282,7 @@ Status: Ready for test. No Kobo is required. Use a copy of an output root, or di
 - On a disposable copy, alter one archive byte, remove one manifest and rename a referenced file. Each should be reported as failed with exit status 1.
 - Confirm the command refuses migration settings, symlinked batches and paths outside `runs/`, and that zh-Hant/zh-Hans output reads correctly.
 - From 1.1.0-dev.9: run `--verify-all` on a real output root and confirm every successful batch verifies and previews show as empty. Run `--verify-run <saved-source-or-resume-run> --with-dependencies` and confirm the original batch is checked too. Pipe `--json` into a JSON tool and confirm it parses, holds no absolute paths and exits 1 after one disposable copy is corrupted.
+- From 1.1.0-dev.10 (Mac app): in Backups, select a saved-source batch and choose Verify backups with the dependency option on. Confirm both batches show Verified and the batch folder is unchanged. Repeat on a disposable corrupted copy and confirm the failed archive and its detail appear in English, Traditional Chinese and Simplified Chinese.
 
 ## Native review and language acceptance (1.1.0-dev.3)
 

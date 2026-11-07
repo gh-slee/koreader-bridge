@@ -569,17 +569,85 @@ def execute(m, request, project):
         m.UIOutput.read = original_read
 
 
+VERIFY_RESULTS = {"verified", "empty", "failed", "missing"}
+
+
+def verify(m, request, project):
+    """Read-only KM-010 verification of one saved batch through the shared CLI path."""
+    ident = run_id(request.get("runID"))
+    dependencies = request.get("withDependencies", False)
+    if type(dependencies) is not bool:
+        raise ProtocolError("Dependency verification must be a boolean.")
+    locale = request.get("locale", "en")
+    if locale not in {"en", "zh-Hant", "zh-Hans"}:
+        raise ProtocolError("Unsupported language.")
+    if not (project / "runs" / ident).is_dir():
+        raise ProtocolError("The selected batch is unavailable.")
+    args = ["koreader-bridge.py", "--backup-dir", str(project), "--locale", locale,
+            "--verify-run", ident, "--json"] + (["--with-dependencies"] if dependencies else [])
+    # Localized human progress goes to stderr and becomes log events; stdout holds one JSON report.
+    stream, report = EventStream(), io.StringIO()
+    old_argv = sys.argv
+    try:
+        sys.argv = args
+        with contextlib.redirect_stdout(report), contextlib.redirect_stderr(stream):
+            code = m.cli()
+        stream.flush()
+    finally:
+        sys.argv = old_argv
+    if code == 130:
+        raise KeyboardInterrupt  # Safe stop: report cancellation, not a verification failure.
+    text = report.getvalue()
+    if len(text.encode()) > MAX_OUTPUT // 2:
+        raise ProtocolError("The verification report is too large.")
+    try:
+        data = json.loads(text, object_pairs_hook=object_unique) if text.strip() else None
+    except json.JSONDecodeError:
+        data = None
+    if not isinstance(data, dict) or data.get("operation") != "verify-runs" or not isinstance(data.get("runs"), list):
+        raise ProtocolError("The selected batch could not be verified.")
+    runs = []
+    for entry in data["runs"][:200]:
+        if not isinstance(entry, dict) or entry.get("result") not in VERIFY_RESULTS:
+            raise ProtocolError("The verification report is invalid.")
+        name = entry.get("run_id")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name) or ".." in name:
+            raise ProtocolError("The verification report is invalid.")
+        artifacts = [{"name": sanitize(a.get("name") or "")[:256], "kind": a.get("kind") if a.get("kind") in {"payload", "koreader", "descriptor"} else None,
+                      "status": "verified" if a.get("status") == "verified" else "failed",
+                      "detail": sanitize(a.get("detail") or "")[:1024]}
+                     for a in entry.get("artifacts", [])[:500] if isinstance(a, dict)]
+        runs.append({"id": name, "requested": entry.get("requested") is True,
+                     "dependencyOf": [p for p in entry.get("dependency_of", []) if isinstance(p, str)][:50],
+                     "result": entry["result"], "detail": sanitize(entry.get("detail") or "")[:1024],
+                     "artifacts": artifacts})
+    summary = data.get("summary", {})
+    counts = {key: summary.get(key) if type(summary.get(key)) is int else 0
+              for key in ["runs", "verified", "empty", "failed", "missing", "artifacts_verified", "artifacts_failed"]}
+    return {"runID": ident, "withDependencies": dependencies, "exitCode": code,
+            "passed": code == 0 and not counts["failed"] and not counts["missing"],
+            "toolVersion": sanitize(data.get("tool_version", ""))[:40], "runs": runs,
+            "summary": {"runs": counts["runs"], "verified": counts["verified"], "empty": counts["empty"],
+                        "failed": counts["failed"], "missing": counts["missing"],
+                        "artifactsVerified": counts["artifacts_verified"], "artifactsFailed": counts["artifacts_failed"]}}
+
+
 def serve():
     global REQUEST_ID
     os.umask(0o077)
     try:
         request = read_packet()
         REQUEST_ID = request["id"]
-        if set(request) - {"version", "id", "operation", "workspace", "config", "runID", "keepSuccessful", "fixtureRoot", "readerSession"}:
+        if set(request) - {"version", "id", "operation", "workspace", "config", "runID", "keepSuccessful", "fixtureRoot",
+                           "readerSession", "withDependencies", "locale"}:
             raise ProtocolError("Unknown request field.")
         operation = request.get("operation")
-        if operation not in {"health", "devices", "catalog", "details", "cleanup_plan", "create_demo", "execute"}:
+        if operation not in {"health", "devices", "catalog", "details", "cleanup_plan", "create_demo", "execute", "verify"}:
             raise ProtocolError("Unsupported operation.")
+        if operation != "verify" and ({"withDependencies", "locale"} & set(request)):
+            raise ProtocolError("Unknown request field.")
+        if operation == "verify" and set(request) - {"version", "id", "operation", "workspace", "runID", "withDependencies", "locale"}:
+            raise ProtocolError("Unknown request field.")
         m = engine()
         if operation == "health":
             result = {"protocolVersion": VERSION, "coreVersion": m.VERSION, "pythonVersion": sys.version.split()[0]}
@@ -587,7 +655,9 @@ def serve():
             result = connected_readers(m, request)
         else:
             project = workspace(request.get("workspace"), create=operation in {"create_demo", "execute"})
-            if operation in {"catalog", "cleanup_plan"}:
+            if operation == "verify":
+                result = verify(m, request, project)
+            elif operation in {"catalog", "cleanup_plan"}:
                 keep = request.get("keepSuccessful", 2)
                 if type(keep) is not int or not 1 <= keep <= 100:
                     raise ProtocolError("Retention must be between 1 and 100.")
