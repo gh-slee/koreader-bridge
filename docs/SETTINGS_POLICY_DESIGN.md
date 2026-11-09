@@ -1,6 +1,6 @@
 # Target hardware settings and portable settings policy: design (KM-008, KM-009)
 
-Status: **Proposed design; no runtime code.** It records which KOReader settings depend on the reader's hardware, how they would be found without running Lua, and the policy that KM-008 (preserve TARGET hardware settings) and KM-009 (settings-only migration) would implement. The owner has not yet decided the [open questions](#open-questions). This document does not authorize device access.
+Status: **Accepted design; not implemented.** It records which KOReader settings depend on the reader's hardware, how they are found without running Lua, and the policy that KM-008 (preserve TARGET hardware settings) and KM-009 (settings-only migration) will implement. The owner accepted the five [decisions](#decisions) on 2026-11-09. This document does not authorize device access or start implementation; KM-008 and KM-009 keep their own approval gates.
 
 Related: [TRACKER.md](../TRACKER.md) (KM-008, KM-009), [resume design](RESUME_DESIGN.md), [development guide](DEVELOPMENT.md).
 
@@ -107,7 +107,7 @@ Read only by Android, Kindle, reMarkable, PocketBook or emulator code, so they d
 
 ### Candidates kept portable for now
 
-These are related to hardware but are also personal reading choices. This design keeps them in class P and asks the owner (see [open questions](#open-questions)):
+These are related to hardware but are also personal reading choices. They stay in class P for the first release ([decision 2](#decisions)) and are reviewed again after hardware acceptance:
 
 - `full_refresh_count`, `night_full_refresh_count` (`frontend/ui/uimanager.lua:23`, `:732-735`): full-refresh frequency, a trade-off between panel ghosting and speed.
 - `refresh_on_pages_with_images`, `refresh_on_chapter_boundaries`, `no_refresh_on_second_chapter_page` (`frontend/ui/elements/refresh_menu_table.lua:110-121`): refresh preferences.
@@ -126,7 +126,7 @@ These are related to hardware but are also personal reading choices. This design
 `last_migration_date` records which of KOReader's one-time settings migrations have run (`frontend/ui/data/onetime_migration.lua:15-21`; v2026.07.1 sets `CURRENT_MIGRATION_DATE = 20260623`). It describes the settings file's format, so it must match the settings content, not the hardware:
 
 - FULL/KOREADER install SOURCE's runtime with SOURCE's portable settings, so the marker comes from SOURCE in both policies. KOReader applies any remaining migrations itself on the next start.
-- Settings-only migration (KM-009) keeps TARGET's runtime. It must refuse when SOURCE's marker is newer than TARGET's runtime can understand, because an older KOReader cannot undo newer migrations. See the open questions for how to compare.
+- Settings-only migration (KM-009) keeps TARGET's runtime. It must refuse when SOURCE's marker is newer than TARGET's runtime can understand, because an older KOReader cannot undo newer migrations. The comparison is in [decision 4](#decisions).
 
 ## Policy behavior (KM-008)
 
@@ -137,11 +137,15 @@ Option: `--settings-policy exact|portable`, default `exact`. It applies only to 
 `portable`:
 
 1. Before the final confirmation, read SOURCE's settings from the verified source archive and TARGET's from the verified TARGET runtime backup. Both must parse with `parse_lua_data` under the existing limits. The top level must be a table with string keys.
-2. Build the result: start from SOURCE's table, replace every class H and O key with TARGET's value or remove it when TARGET has none, set `device_id` from the identity choice, and keep SOURCE's `last_migration_date`.
+2. Build the result: start from SOURCE's table, replace every class H and O key with TARGET's value or remove it when TARGET has none ([decision 3](#decisions)), set `device_id` from the identity choice, and keep SOURCE's `last_migration_date`.
 3. A class H value must be a boolean, number, string or a table of those (nested tables allowed within parser limits). Any other shape refuses the policy.
 4. Show the result in the preview and difference report: which keys keep TARGET's value, which become unset and which came from SOURCE. Values of class H keys are shown; other values are not printed.
 5. After the runtime replacement, write the merged table with a new deterministic Lua literal writer that follows KOReader's own format (header comment, sorted keys) and replaces the file atomically. Parse the written file again and require it to equal the planned table before continuing. A mismatch fails the migration and rolls back as today.
 6. Apply the same rule to `settings/battery_stats.lua`.
+
+Preview hint: when the confirmed SOURCE and TARGET models differ and the policy is `exact`, the preview and review explain that `portable` would keep TARGET's hardware settings ([decision 1](#decisions)). The hint never changes the policy by itself.
+
+Release check: the key list records the KOReader release it was checked against (v2026.07.1). When the runtime that will be installed reports a newer or unrecognized version in `.adds/koreader/git-rev`, `portable` shows a warning that new hardware keys may be missing from the list, and continues ([decision 5](#decisions)).
 
 Refusal rules: the portable policy refuses with an owned, catalogued error, before any TARGET write, when either settings file is missing, unreadable, too large, not a single returned table, or holds a hardware value of an unsupported shape. The user can rerun with `--settings-policy exact` or cancel. Nothing falls back silently.
 
@@ -156,7 +160,8 @@ KM-009 keeps TARGET's whole runtime and transfers settings and resources. With t
 - `settings.reader.lua`: class P from SOURCE, classes H and O from TARGET, `device_id` kept from TARGET unless the user asks for a new one. `last_migration_date` must pass the [schema check](#schema-marker).
 - Portable files under `settings/`, and user-added resources such as fonts, dictionaries and styles, come from SOURCE, after backup.
 - Plugins: only plugins that are not part of TARGET's runtime are candidates. Core plugins are never copied over TARGET's. Copied plugins are files only; they are never run.
-- Refuse when TARGET has no KOReader runtime, when either settings file fails to parse, or when the schema check fails.
+- Schema check ([decision 4](#decisions)): read TARGET's `CURRENT_MIGRATION_DATE` from `frontend/ui/data/onetime_migration.lua` in TARGET's runtime with one bounded, anchored pattern, and refuse when SOURCE's `last_migration_date` is newer. The file is read as text only and never executed.
+- Refuse when TARGET has no KOReader runtime, when either settings file fails to parse, or when the schema check fails or cannot find exactly one match.
 
 KM-009 keeps the same backup, verification, confirmation and rollback rules as FULL/KOREADER.
 
@@ -172,15 +177,19 @@ KM-009 keeps the same backup, verification, confirmation and rollback rules as F
 
 - Synthetic settings files for each class, nested `natural_light_config`, missing keys on either side, unknown keys, header comments and Unicode strings.
 - Refusals: unparseable files, oversize input, non-table returns, unsupported value shapes, and LIBRARY with the option.
+- The model-difference hint and the newer-release warning appear when expected and never change the plan.
+- KM-009 schema check: newer SOURCE marker refuses; missing, repeated or malformed constants refuse.
 - Round trip: the writer's output parses back to the same table; the writer never emits executable code.
 - Rollback after a failed settings write restores the original TARGET bytes; resume reapplies the recorded policy.
 - `exact` output stays byte-identical to the current FULL/KOREADER result.
 - No test reads a physical reader. Hardware acceptance is a separate, owner-approved step.
 
-## Open questions
+## Decisions
 
-1. **Default policy.** Recommendation: keep `exact` as the default for compatibility, and have the preview suggest `portable` when SOURCE and TARGET models differ. Alternative: default to `portable` for different models.
-2. **Refresh and power choices** (`full_refresh_count`, `night_full_refresh_count`, refresh options, `auto_suspend_timeout_seconds`, `auto_standby_timeout_seconds`). Recommendation: keep them portable (class P) in the first release, because they are reading choices; revisit after hardware acceptance.
-3. **Class H key missing on TARGET.** Recommendation: leave the key unset so TARGET's KOReader uses its own default, rather than copying SOURCE's value for different hardware.
-4. **Schema check for KM-009.** KOReader exposes `CURRENT_MIGRATION_DATE` only as a Lua source constant. Recommendation: read it from TARGET's `frontend/ui/data/onetime_migration.lua` with one bounded, anchored pattern (`local CURRENT_MIGRATION_DATE = <8 digits>`), treat a missing or ambiguous match as a refusal, and never execute the file. Alternative: compare the runtime version files (`git-rev`) and refuse unless TARGET is the same or newer.
-5. **Which KOReader releases to support.** Recommendation: record the release this key list was checked against (v2026.07.1) and warn, without refusing, when a runtime's version is newer than the last checked release.
+The owner accepted these on 2026-11-09:
+
+1. **Default policy:** `exact` stays the default for compatibility. When SOURCE and TARGET models differ, the preview suggests `portable`.
+2. **Refresh and power choices** (`full_refresh_count`, `night_full_refresh_count`, refresh options, `auto_suspend_timeout_seconds`, `auto_standby_timeout_seconds`) stay portable (class P) in the first release, because they are reading choices. Revisit after hardware acceptance.
+3. **Class H key missing on TARGET:** leave it unset so TARGET's KOReader uses its own default. SOURCE's value for different hardware is never copied.
+4. **KM-009 schema check:** read `CURRENT_MIGRATION_DATE` from TARGET's `frontend/ui/data/onetime_migration.lua` with one bounded, anchored pattern (`local CURRENT_MIGRATION_DATE = <8 digits>`). A missing or ambiguous match refuses. The file is never executed.
+5. **KOReader releases:** record the release this key list was checked against (v2026.07.1). Warn, without refusing, when a runtime's version is newer than the last checked release or cannot be recognized.
