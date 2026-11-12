@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0-dev.10: verify backups in the Mac app
+
+- The Backups page has a **Verify backups** action for the selected batch, with an option to include the batches it depends on. It runs the same read-only check as `--verify-run` (and `--with-dependencies`) and shows a result for each batch, with failed archives and their diagnostic detail. Nothing is repaired or changed.
+- The desktop helper adds a typed `verify` request. It accepts only a batch ID, a boolean dependency option and a supported language, and refuses every other field. Progress appears in Activity in the chosen language; the result keeps run IDs and file names only. A safe stop reports cancellation. CLI behavior and the JSON report are unchanged.
+- Native interface text for the new action is catalogued in English, Traditional Chinese and Simplified Chinese.
+
 ## 1.1.0-dev.9: batch verification extensions
 
 - `--verify-run` can be repeated, and `--verify-all` checks every saved batch in the project. With more than one batch, an overall line reports how many had problems. Single-batch output is unchanged.

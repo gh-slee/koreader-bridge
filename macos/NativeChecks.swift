@@ -229,6 +229,13 @@ import Foundation
             try require(restored, "Exact restore failed."); cases.append("exact-restore")
             let reuse = await model.execute(model.config.workflow(action: "reuse", dryRun: false, runID: captured.id))
             try require(reuse, "Saved-source migration failed."); cases.append("saved-source")
+            guard let reused = model.runs.first(where: { $0.operation == "saved-source" && $0.status == "success" }) else { throw Failure(code: "native_test", message: "No saved-source batch.") }
+            model.selectedRun = reused.id; model.verifyDependencies = true
+            let verified = await model.verifySelected()
+            try require(verified && model.verification?.passed == true && model.verification?.runs.count == 2
+                        && model.verification?.runs.contains(where: { $0.id == captured.id && !$0.requested && $0.result == "verified" }) == true
+                        && (model.verification?.summary.artifactsVerified ?? 0) > 0, "Backup verification with dependencies failed.")
+            cases.append("verify-batch-with-dependencies")
             model.config.mode = "library"
             for policy in ["overwrite", "keep-target"] {
                 model.config.conflict = policy
@@ -256,6 +263,8 @@ import Foundation
             model.phase = "Sample session complete"; model.config.mode = "full"
             model.selectedRun = captured.id
             await model.details()
+            let shown = await model.verifySelected()
+            try require(shown && model.verification?.passed == true, "Selected batch verification failed.")
             let storedOutput = model.config.outputRoot
             // Display a synthetic path during Settings captures; no operation uses it.
             model.config.outputRoot = "/Sample/Private Backups"
@@ -294,6 +303,24 @@ import Foundation
             }
             model.config.locale = "en"; NSApp.appearance = NSAppearance(named: .aqua)
             cases.append("localized-four-page-and-model-warning-layout")
+            // Corrupt one synthetic archive copy so the failure presentation is exercised; sample data only.
+            guard let sampleWorkspace = model.sample?.workspace else { throw Failure(code: "native_test", message: "Missing sample workspace.") }
+            let batch = URL(fileURLWithPath: sampleWorkspace).appendingPathComponent("runs").appendingPathComponent(captured.id)
+            guard let archive = try FileManager.default.contentsOfDirectory(at: batch, includingPropertiesForKeys: nil)
+                    .filter({ $0.pathExtension == "zip" }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }).first else {
+                throw Failure(code: "native_test", message: "Missing synthetic archive.")
+            }
+            var bytes = try Data(contentsOf: archive); bytes[bytes.count - 30] ^= 1; try bytes.write(to: archive)
+            model.section = .backups; model.selectedRun = captured.id; model.verifyDependencies = false
+            let checked = await model.verifySelected()
+            try require(checked && model.verification?.passed == false && model.verification?.summary.failed == 1 && model.problem != nil,
+                        "Corrupted archive was not reported.")
+            for language in ["en", "zh-Hant", "zh-Hans"] {
+                model.config.locale = language
+                try await capture("backups-verify-failed-" + language + ".png")
+            }
+            model.config.locale = "en"; model.problem = nil
+            cases.append("verify-reports-corrupted-archive")
             cases.append("minimum-window-resize")
             let originalRuns = model.runs
             let longRow = RunEntry(id: "sample-long-batch-name-for-reading-setup-migration-and-recovery-2024-01-01",

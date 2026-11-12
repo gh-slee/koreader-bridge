@@ -8,9 +8,11 @@ The app starts a bundled, pinned Python interpreter through Foundation.Process, 
 
 stdout carries only protocol messages. Diagnostics strip control sequences and common secret tokens. Unexpected failures return a generic error without a traceback.
 
-The available operations are health, devices, catalog, details, cleanup_plan, create_demo and execute. Protocol v1 adds optional readerSession and typed workflow readers while preserving older callers. New clients receive physical connection choices; callers without readerSession keep the earlier hint-only discovery response.
+The available operations are health, devices, catalog, details, cleanup_plan, create_demo, execute and verify. Protocol v1 adds optional readerSession and typed workflow readers while preserving older callers. New clients receive physical connection choices; callers without readerSession keep the earlier hint-only discovery response.
 
 Execute maps allowlisted typed options to existing CLI arguments and adapts reader selection and presentation. It cannot run arbitrary commands, modules or code, edit arbitrary files or execute Lua. Previews are the default, and writes still require confirmation.
+
+Verify accepts only `workspace`, a batch `runID`, a boolean `withDependencies` and a supported `locale`; any other field is refused. It runs the read-only `--verify-run RUN_ID --json` path, optionally with `--with-dependencies`, streams localized progress as log events and returns a bounded, sanitized per-batch report with run IDs and file names only. It touches no reader and never repairs, rewrites or deletes a batch. A safe stop returns cancellation.
 
 ## Reader identity
 
